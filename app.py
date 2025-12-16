@@ -25,7 +25,8 @@ from services.ocr.formula_detector import FormulaDetector
 from services.ocr.image_to_latex import ImageToLatex
 from services.ocr.latex_to_mathml import LatexToMathML
 from services.exporters.xml_writer import XMLWriter
-from ui.main_window import run_qt_app
+# Import run_qt_app lazily - only when GUI mode is needed (not in API mode)
+# This prevents PyQt6 from loading on headless servers
 from utils.file_utils import ensure_directories
 from utils.image_utils import crop_image
 from utils.ip_guard import enforce_ip_allowlist
@@ -233,8 +234,14 @@ def main() -> None:
     """Entry point for CLI; starts FastAPI or PyQt based on args."""
     init_logging()
     ensure_directories()
-    if settings.allowed_ips and not enforce_ip_allowlist(set(settings.allowed_ips)):
-        # User-friendly dialog when blocked
+    
+    # Check mode first - IP allowlist only applies to GUI mode
+    mode: Optional[str] = sys.argv[1] if len(sys.argv) > 1 else None
+    
+    # IP allowlist check - skip in API mode (web servers should be accessible)
+    # Also skip if MATHPIX_ALLOWED_IPS is not set (allow all)
+    if mode != "api" and settings.allowed_ips and not enforce_ip_allowlist(set(settings.allowed_ips)):
+        # User-friendly dialog when blocked (GUI mode only)
         try:
             from PyQt6 import QtWidgets, QtCore
             
@@ -255,12 +262,15 @@ def main() -> None:
                 "Update the allowlist and rebuild/restart."
             )
         sys.exit(1)
-    mode: Optional[str] = sys.argv[1] if len(sys.argv) > 1 else None
+    
     if mode == "api":
         logger.info("Starting FastAPI server at %s:%s", settings.host, settings.port)
+        # API mode - no PyQt6 needed, skip IP check
         uvicorn.run(create_app(), host=settings.host, port=settings.port)
     else:
         logger.info("Starting PyQt6 UI")
+        # Lazy import - only load PyQt6 when GUI mode is needed
+        from ui.main_window import run_qt_app
         run_qt_app()
 
 

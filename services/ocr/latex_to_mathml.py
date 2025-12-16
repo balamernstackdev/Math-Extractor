@@ -175,7 +175,7 @@ class LatexToMathML:
         Clean invalid MathML by removing literal LaTeX commands and fixing corrupted text.
         
         Fixes:
-        - Removes literal LaTeX commands like \stackrel, \dag from MathML
+        - Removes literal LaTeX commands like \\stackrel, \\dag from MathML
         - Fixes corrupted text like "Iniln" → "min" (OCR errors)
         - Removes invalid elements containing LaTeX commands
         """
@@ -1381,9 +1381,9 @@ class LatexToMathML:
         Fix corrupted LaTeX commands that appear in OCR output.
         
         Common OCR errors:
-        - \j → j (when it's clearly meant to be just j, not dotless j)
-        - \subseteqT\leqt → 0 \leq \tau \leq t (corrupted inequality chains)
-        - \inE → \in E (missing spaces)
+        - \\j → j (when it's clearly meant to be just j, not dotless j)
+        - \\subseteqT\\leqt → 0 \\leq \\tau \\leq t (corrupted inequality chains)
+        - \\inE → \\in E (missing spaces)
         - Other corrupted command patterns
         """
         if not text:
@@ -1533,7 +1533,7 @@ class LatexToMathML:
         Attempt to repair common LaTeX issues that cause conversion failures.
         
         This function tries to fix:
-        - Corrupted LaTeX commands (like \j, \subseteqT\leqt)
+        - Corrupted LaTeX commands (like \\j, \\subseteqT\\leqt)
         - Unbalanced braces (conservatively)
         - Unmatched \left/\right pairs
         - Common command issues
