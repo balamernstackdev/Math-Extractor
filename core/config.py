@@ -119,8 +119,10 @@ class Settings:
     uploads_dir: Path = data_dir / "uploads"
     snips_dir: Path = data_dir / "snips"
     notes_dir: Path = data_dir / "notes"
-    host: str = os.getenv("MATHPIX_HOST", "127.0.0.1")
-    port: int = int(os.getenv("MATHPIX_PORT", "8000"))
+    # Default to 0.0.0.0 for web deployment (Render, Railway, etc.)
+    # Use 127.0.0.1 only if explicitly set for local development
+    host: str = os.getenv("MATHPIX_HOST", os.getenv("HOST", "0.0.0.0"))
+    port: int = int(os.getenv("MATHPIX_PORT", os.getenv("PORT", "8000")))
     log_level: str = os.getenv("MATHPIX_LOG_LEVEL", "INFO")
     allowed_ips: set[str] = frozenset(
         ip.strip()

@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import sys
+import os
 from pathlib import Path
 from typing import Optional
+from contextlib import asynccontextmanager
 
 import tempfile
-from pathlib import Path
 
 # NOTE: Do NOT import QtWebEngine here at module level!
 # The runtime hook (pyi_rth_pyqt6.py) will set PATH and initialize Qt properly.
@@ -34,7 +35,22 @@ from utils.ip_guard import enforce_ip_allowlist
 
 def create_app() -> FastAPI:
     """Create FastAPI app with basic health and upload routes."""
-    app = FastAPI(title="MathML Extractor", version="0.1.0")
+    # Use lifespan handlers instead of deprecated on_event
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Startup
+        init_logging()
+        ensure_directories()
+        logger.info("FastAPI service started")
+        yield
+        # Shutdown (if needed)
+        logger.info("FastAPI service shutting down")
+    
+    app = FastAPI(
+        title="MathML Extractor",
+        version="0.1.0",
+        lifespan=lifespan
+    )
 
     # LAZY LOADING: Don't initialize ML models at startup to save memory
     # Models will be loaded on first request (lazy initialization)
@@ -82,12 +98,6 @@ def create_app() -> FastAPI:
         if xml_writer is None:
             xml_writer = XMLWriter()
         return xml_writer
-
-    @app.on_event("startup")
-    async def startup_event() -> None:
-        init_logging()
-        ensure_directories()
-        logger.info("FastAPI service started")
 
     @app.get("/", response_class=HTMLResponse)
     async def root() -> str:
@@ -304,9 +314,18 @@ def main() -> None:
         sys.exit(1)
     
     if mode == "api":
-        logger.info("Starting FastAPI server at %s:%s", settings.host, settings.port)
+        # CRITICAL: Render requires binding to 0.0.0.0, not 127.0.0.1
+        # Check environment variables first (Render sets HOST and PORT)
+        host = os.getenv("HOST", settings.host)
+        if host == "127.0.0.1":
+            # Override localhost for web deployment
+            host = "0.0.0.0"
+        
+        port = int(os.getenv("PORT", str(settings.port)))
+        
+        logger.info("Starting FastAPI server at %s:%s", host, port)
         # API mode - no PyQt6 needed, skip IP check
-        uvicorn.run(create_app(), host=settings.host, port=settings.port)
+        uvicorn.run(create_app(), host=host, port=port)
     else:
         logger.info("Starting PyQt6 UI")
         # Lazy import - only load PyQt6 when GUI mode is needed
