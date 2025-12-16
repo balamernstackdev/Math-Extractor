@@ -1,0 +1,56 @@
+# Python virtual environment
+.venv/
+venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project specific - User data (should not be in repo)
+data/uploads/
+data/mathml/
+*.log
+*.log.*
+
+# Build artifacts
+*.spec.bak
+
+# ML Models (if downloaded separately)
+*.pth
+*.pt
+*.onnx
+*.h5
+models/
+checkpoints/
+.cache/
+
+# Test files (large)
+tests/*.pdf
+tests/*.png
+tests/*.jpg
+tests/*.jpeg
+
+# Temporary files
+*.tmp
+*.temp
+*.bak

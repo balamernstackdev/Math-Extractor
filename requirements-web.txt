@@ -1,0 +1,40 @@
+# Lightweight requirements for web deployment (Render, Railway, etc.)
+# Excludes PyQt6 since web mode doesn't need it
+
+# -------------------------
+# Web / API
+# -------------------------
+fastapi
+uvicorn[standard]
+httpx
+python-multipart
+
+# -------------------------
+# PDF / Image / OCR
+# -------------------------
+pillow
+opencv-python
+pdf2image
+pytesseract
+pymupdf  # PyMuPDF for PDF processing
+
+# -------------------------
+# Math / LaTeX
+# -------------------------
+latex2mathml
+pix2tex
+numpy
+
+# -------------------------
+# ML / AI
+# -------------------------
+openai
+
+# -------------------------
+# Config / Utils
+# -------------------------
+python-dotenv
+
+# Note: PyQt6 and PyQt6-WebEngine are NOT needed for web mode
+# They're only required for desktop EXE builds
+

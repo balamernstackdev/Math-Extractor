@@ -1,0 +1,46 @@
+# -------------------------
+# Web / API
+# -------------------------
+fastapi
+uvicorn
+httpx
+python-multipart
+
+# -------------------------
+# UI
+# -------------------------
+PyQt6
+streamlit
+
+# -------------------------
+# PDF / Image / OCR
+# -------------------------
+pillow
+opencv-python
+pdf2image
+pytesseract
+pymupdf  # PyMuPDF for PDF processing
+
+# -------------------------
+# Math / LaTeX
+# -------------------------
+latex2mathml
+pix2tex
+numpy
+PyQt6-WebEngine
+
+# -------------------------
+# ML / AI
+# -------------------------
+openai
+
+# -------------------------
+# Config / Utils
+# -------------------------
+python-dotenv
+
+# -------------------------
+# Build / Test
+# -------------------------
+pyinstaller
+pytest

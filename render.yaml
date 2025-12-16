@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: mathpix-clone
+    env: python
+    # Use requirements.txt (PyQt6 included but won't be used in web mode)
+    # For faster builds, you can use requirements-web.txt instead
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py api
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 8000
+      # Optional: Set allowed IPs if needed
+      # - key: MATHPIX_ALLOWED_IPS
+      #   value: ""
+
