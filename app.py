@@ -314,16 +314,13 @@ def main() -> None:
         sys.exit(1)
     
     if mode == "api":
-        # CRITICAL: Render requires binding to 0.0.0.0, not 127.0.0.1
-        # Check environment variables first (Render sets HOST and PORT)
-        host = os.getenv("HOST", settings.host)
-        if host == "127.0.0.1":
-            # Override localhost for web deployment
-            host = "0.0.0.0"
+        # CRITICAL: For web deployment (Render, Railway, etc.), ALWAYS use 0.0.0.0
+        # Render requires binding to 0.0.0.0 to accept external connections
+        # Check PORT from environment (Render sets this), default to 8000
+        port = int(os.getenv("PORT", "8000"))
+        host = "0.0.0.0"  # Always use 0.0.0.0 for API mode (web deployment)
         
-        port = int(os.getenv("PORT", str(settings.port)))
-        
-        logger.info("Starting FastAPI server at %s:%s", host, port)
+        logger.info("Starting FastAPI server at %s:%s (API mode)", host, port)
         # API mode - no PyQt6 needed, skip IP check
         uvicorn.run(create_app(), host=host, port=port)
     else:
