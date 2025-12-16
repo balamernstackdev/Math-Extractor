@@ -36,12 +36,52 @@ def create_app() -> FastAPI:
     """Create FastAPI app with basic health and upload routes."""
     app = FastAPI(title="MathML Extractor", version="0.1.0")
 
-    pdf_reader = PDFReader()
-    pdf_renderer = PDFRenderer()
-    detector = FormulaDetector()
-    latex_ocr = ImageToLatex()
-    latex_mathml = LatexToMathML()
-    xml_writer = XMLWriter()
+    # LAZY LOADING: Don't initialize ML models at startup to save memory
+    # Models will be loaded on first request (lazy initialization)
+    # This is critical for Render's 512MB free tier limit
+    pdf_reader = None
+    pdf_renderer = None
+    detector = None
+    latex_ocr = None
+    latex_mathml = None
+    xml_writer = None
+    
+    def get_pdf_reader():
+        nonlocal pdf_reader
+        if pdf_reader is None:
+            pdf_reader = PDFReader()
+        return pdf_reader
+    
+    def get_pdf_renderer():
+        nonlocal pdf_renderer
+        if pdf_renderer is None:
+            pdf_renderer = PDFRenderer()
+        return pdf_renderer
+    
+    def get_detector():
+        nonlocal detector
+        if detector is None:
+            detector = FormulaDetector()
+        return detector
+    
+    def get_latex_ocr():
+        nonlocal latex_ocr
+        if latex_ocr is None:
+            logger.info("Loading ImageToLatex model (first request)...")
+            latex_ocr = ImageToLatex()
+        return latex_ocr
+    
+    def get_latex_mathml():
+        nonlocal latex_mathml
+        if latex_mathml is None:
+            latex_mathml = LatexToMathML()
+        return latex_mathml
+    
+    def get_xml_writer():
+        nonlocal xml_writer
+        if xml_writer is None:
+            xml_writer = XMLWriter()
+        return xml_writer
 
     @app.on_event("startup")
     async def startup_event() -> None:
@@ -146,18 +186,18 @@ def create_app() -> FastAPI:
             formulas = []
             
             if file.content_type == "application/pdf":
-                # Process PDF
-                pages = pdf_reader.read_pdf(tmp_path)
-                images = pdf_renderer.render_pages(pages)
+                # Process PDF (lazy load models)
+                pages = get_pdf_reader().read_pdf(tmp_path)
+                images = get_pdf_renderer().render_pages(pages)
                 
                 for img_path in images:
-                    bboxes = detector.detect_formulas(img_path)
+                    bboxes = get_detector().detect_formulas(img_path)
                     for bbox in bboxes:
-                        # Extract LaTeX and MathML
+                        # Extract LaTeX and MathML (lazy load OCR model)
                         try:
                             crop_path = crop_image(img_path, bbox)
-                            latex = latex_ocr.image_to_latex(crop_path)
-                            mathml = latex_mathml.convert(latex) if latex else ""
+                            latex = get_latex_ocr().image_to_latex(crop_path)
+                            mathml = get_latex_mathml().convert(latex) if latex else ""
                             formulas.append({
                                 "latex": latex or "",
                                 "mathml": mathml or "",
@@ -166,13 +206,13 @@ def create_app() -> FastAPI:
                         except Exception as e:
                             logger.warning(f"Failed to extract formula: {e}")
             else:
-                # Process image
-                bboxes = detector.detect_formulas(tmp_path)
+                # Process image (lazy load models)
+                bboxes = get_detector().detect_formulas(tmp_path)
                 for bbox in bboxes:
                     try:
                         crop_path = crop_image(tmp_path, bbox)
-                        latex = latex_ocr.image_to_latex(crop_path)
-                        mathml = latex_mathml.convert(latex) if latex else ""
+                        latex = get_latex_ocr().image_to_latex(crop_path)
+                        mathml = get_latex_mathml().convert(latex) if latex else ""
                         formulas.append({
                             "latex": latex or "",
                             "mathml": mathml or "",
@@ -202,15 +242,15 @@ def create_app() -> FastAPI:
     async def process_pdf(path: str) -> dict[str, str | list[dict[str, float | str]]]:
         """Process a PDF path through render and detection pipeline."""
         try:
-            pages = pdf_reader.read_pdf(path)
-            images = pdf_renderer.render_pages(pages)
+            pages = get_pdf_reader().read_pdf(path)
+            images = get_pdf_renderer().render_pages(pages)
             results: list[dict[str, float | str]] = []
             for img_path in images:
-                bboxes = detector.detect_formulas(img_path)
+                bboxes = get_detector().detect_formulas(img_path)
                 for bbox in bboxes:
                     bbox["page_image"] = str(img_path)
                 results.extend(bboxes)
-            xml_writer.write_document(results)
+            get_xml_writer().write_document(results)
             return {"status": "processed", "bounding_boxes": results}
         except Exception as exc:  # noqa: BLE001
             logger.exception("Processing failed: %s", exc)
@@ -220,8 +260,8 @@ def create_app() -> FastAPI:
     async def ocr_region(image_path: str) -> dict[str, str]:
         """OCR a cropped region to LaTeX and MathML."""
         try:
-            latex = latex_ocr.image_to_latex(image_path)
-            mathml = latex_mathml.convert(latex)
+            latex = get_latex_ocr().image_to_latex(image_path)
+            mathml = get_latex_mathml().convert(latex)
             return {"latex": latex, "mathml": mathml}
         except Exception as exc:  # noqa: BLE001
             logger.exception("OCR failed: %s", exc)

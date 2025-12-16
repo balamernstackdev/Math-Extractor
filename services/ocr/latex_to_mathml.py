@@ -1535,7 +1535,7 @@ class LatexToMathML:
         This function tries to fix:
         - Corrupted LaTeX commands (like \\j, \\subseteqT\\leqt)
         - Unbalanced braces (conservatively)
-        - Unmatched \left/\right pairs
+        - Unmatched \\left/\\right pairs
         - Common command issues
         - Extra closing braces/delimiters
         
