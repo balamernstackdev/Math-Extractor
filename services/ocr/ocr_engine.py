@@ -704,8 +704,44 @@ class ImageToLatex:
             return None
     
     def _is_corrupted_ocr_output(self, text: str) -> bool:
-        """Detect if OCR output is corrupted (Stub 2)."""
-        if not text: return True
+        """
+        Detect if OCR output is likely corrupted or low quality.
+        Returns True if the output looks like garbage and should trigger fallback.
+        """
+        if not text or len(text.strip()) < 3:
+            return True
+            
+        # 1. Check for unbalanced braces (strong indicator of broken latex)
+        if text.count('{') != text.count('}'):
+            # Allow small mismatch if complex, but generally bad
+            if abs(text.count('{') - text.count('}')) > 1:
+                logger.debug("[Corruption] Unbalanced braces")
+                return True
+
+        # 2. Check for high density of special garbage characters
+        # Count non-ASCII, non-math symbols
+        # Allowed: alphanumeric, space, \ { } ^ _ = + - * ( ) [ ]
+        # We classify everything else as potentially 'noise' if in high ratio
+        invalid_chars = 0
+        total_chars = len(text)
+        
+        # Simple ASCII-safe check
+        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\\{}^_=+-*()[].,;:!? \n\t")
+        for char in text:
+            if char not in allowed:
+                invalid_chars += 1
+        
+        error_ratio = invalid_chars / total_chars
+        if error_ratio > 0.3: # More than 30% unrecognised chars
+            logger.debug(f"[Corruption] High noise ratio: {error_ratio:.2f}")
+            return True
+            
+        # 3. Check for specific garbage patterns (repeated chars)
+        import re
+        if re.search(r'(\D)\1{5,}', text): # Same non-digit char repeated 6+ times (e.g. "......")
+            logger.debug("[Corruption] Repeated character pattern")
+            return True
+            
         return False
     
     def _calculate_basic_quality(self, latex: str) -> float:
