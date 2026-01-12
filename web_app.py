@@ -38,6 +38,7 @@ from typing import List, Dict, Any, Optional
 
 import streamlit as st
 from PIL import Image
+from streamlit_cropper import st_cropper
 
 from core.config import settings
 from core.logger import init_logging, logger
@@ -302,6 +303,9 @@ col_preview, col_right = st.columns([3, 2])
 with col_preview:
     st.markdown("### 📄 Document Preview")
     
+    # Selection Mode Toggle
+    crop_mode = st.toggle("✂️ Enable Selection (Drag to Crop)", value=False, help="Enable this to manually select an equation from the page")
+    
     if st.session_state.page_images:
         # Multi-page navigation - MORE PROMINENT
         if len(st.session_state.page_images) > 1:
@@ -319,9 +323,43 @@ with col_preview:
             with col_p2:
                 st.markdown(f"<p style='padding-top: 32px;'>of {len(st.session_state.page_images)} pages</p>", unsafe_allow_html=True)
         
-        # Show current page
+        # Show current page / Cropper
         if st.session_state.current_page < len(st.session_state.page_images):
-            st.image(st.session_state.page_images[st.session_state.current_page], width="stretch")
+            img_path = st.session_state.page_images[st.session_state.current_page]
+            img = Image.open(img_path)
+            
+            if crop_mode:
+                st.info("💡 Drag the box over an equation to select it")
+                cropped_img = st_cropper(img, realtime_update=True, box_color='#00d4ff', aspect_ratio=None)
+                
+                # Auto-process the crop
+                if cropped_img:
+                    # Update manual snip result with this crop
+                    with st.spinner("Extracting from selection..."):
+                        try:
+                            # Convert PIL image to bytes for processing
+                            buf = io.BytesIO()
+                            cropped_img.save(buf, format="PNG")
+                            buf.seek(0)
+                            
+                            # Save to temp file for OCR service
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+                                tmp.write(buf.getvalue())
+                                tmp_path = Path(tmp.name)
+                            
+                            latex = services["latex_ocr"].image_to_latex(tmp_path)
+                            mathml = services["latex_mathml"].convert(latex) if latex else ""
+                            
+                            st.session_state.manual_snip_result = {
+                                "latex": latex or "",
+                                "mathml": mathml or "",
+                                "is_valid": bool(latex and mathml and "<math" in mathml),
+                                "is_crop": True # Flag to show it's from current page crop
+                            }
+                        except Exception as e:
+                            st.error(f"Crop OCR failed: {e}")
+            else:
+                st.image(img, width="stretch")
         else:
             st.session_state.current_page = 0
             st.rerun()

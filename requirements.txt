@@ -13,6 +13,7 @@ python-multipart
 # -------------------------
 # PyQt6  # Desktop only - not for Streamlit Cloud
 streamlit
+streamlit-cropper
 
 # -------------------------
 # PDF / Image / OCR
