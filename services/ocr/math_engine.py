@@ -523,8 +523,11 @@ class ImageToLatex:
                  log_debug(traceback.format_exc())
                  
                  # Re-raise original error to trigger Tesseract fallback
-                 self.init_error = f"Double Failure: {ie} -> {direct_err}"
-                 raise ie
+                 # Do NOT re-raise. Capture the error so user can see it in UI.
+                 error_summary = f"FAIL 1 (Standard): {ie} || FAIL 2 (Direct): {direct_err}"
+                 self.init_error = error_summary
+                 logger.error(f"FATAL OCR INIT FAILURE: {error_summary}")
+                 self.has_math_ocr = False
 
 
     def _write_debug_file(self, filename, content):
