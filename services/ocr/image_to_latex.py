@@ -1100,41 +1100,38 @@ class ImageToLatex:
             
         # 1. Suspicious short outputs with weird brackets
         if len(text) < 15 and ("{" not in text and "}" not in text):
-            # "f [ x ]" matches but "x = y" is valid.
             if any(c in text for c in "[]@#$"):
                 return True
                 
         # 2. Known Tesseract failure artifacts
-        artifacts = ["hag", "Xil", "Yl]", "t€Z", "[e]", "|Xilé]", "€L"]
+        # REMOVED unicode to prevent SyntaxError/Encoding issues
+        artifacts = ["hag", "Xil", "Yl]", "tZ", "[e]", "|Xile]", "L"]
         for art in artifacts:
             if art in text:
                 return True
                 
         # 3. Ratio of valid latex commands
         if "\\" not in text and len(text) > 10:
-            # If length > 10 and NO backslashes, highly suspicious for math
             return True
             
         # 4. Too many non-ascii or weird punctuation
         bad_chars = sum(1 for c in text if c in "?!@#$|[]")
-        if bad_chars > len(text) * 0.3: # >30% garbage
+        if bad_chars > len(text) * 0.3:
             return True
-            
+
         import re
-        
-        # Check for shredded command patterns like \e_{q}u_{i}v, \m_{a}t_{h}b_{f}
+        # Check for shredded command patterns
         shredded_patterns = [
-            r'\\[a-z]_\{[a-z]\}[a-z]_\{[a-z]\}',  # \e_{q}u_{i} pattern
-            r'\\[a-z]_\{[a-z]\}[a-z]_\{[a-z]\}[a-z]_\{[a-z]\}',  # \m_{a}t_{h}b_{f}
-            r'\\[a-z]\s+[a-z]\s+[a-z]',  # Spaced commands like \ e q
-            r'[a-z]_\{[a-z]\}[a-z]_\{[a-z]\}',  # Without backslash: e_{q}u_{i}
+            r'\\[a-z]_\{[a-z]\}[a-z]_\{[a-z]\}',
+            r'\\[a-z]\s+[a-z]\s+[a-z]',
+            r'[a-z]_\{[a-z]\}[a-z]_\{[a-z]\}'
         ]
         
         for pattern in shredded_patterns:
             if re.search(pattern, text):
                 return True
         
-        # Check for many single-letter subscripts in a row (indicates corruption)
+        return False
 
     def _calculate_basic_quality(self, latex: str) -> float:
         """
