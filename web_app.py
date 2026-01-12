@@ -1,9 +1,8 @@
-"""Streamlit web application for MathPix Clone - Matching Desktop UI."""
+"""Streamlit web application for MathPix Clone - Matching Desktop UI Flow."""
 from __future__ import annotations
 
 import os
 import tempfile
-import base64
 
 # -------------------------------------------------------------------------
 # CRITICAL: Set writable cache directories BEFORE importing ML libraries
@@ -19,9 +18,7 @@ os.environ["PIX2TEX_CACHE"] = os.path.join(_cache_dir, "pix2tex")
 os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-# -------------------------------------------------------------------------
-# LOAD SECRETS: Streamlit Cloud secrets OR .env file
-# -------------------------------------------------------------------------
+# Load secrets
 try:
     import streamlit as st
     if hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
@@ -75,36 +72,28 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
+# CSS
 st.markdown("""
 <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    
     .stApp { background-color: #1a1a2e; }
+    [data-testid="stSidebar"] { background-color: #16213e; }
     
-    [data-testid="stSidebar"] {
-        background-color: #16213e;
-        border-right: 1px solid #2d3748;
-    }
-    
-    .formula-preview {
+    .formula-card {
         background: #1e3a5f;
         border: 1px solid #3d5a80;
         border-radius: 8px;
-        padding: 8px;
-        margin: 4px 0;
-        cursor: pointer;
+        padding: 12px;
+        margin: 8px 0;
     }
-    .formula-preview:hover {
-        border-color: #00d4ff;
-    }
-    .formula-preview img {
-        max-height: 60px;
+    .formula-card img {
+        max-height: 80px;
         width: 100%;
         object-fit: contain;
+        background: white;
+        border-radius: 4px;
     }
-    
     .formula-count {
         background: #16213e;
         border-left: 4px solid #00d4ff;
@@ -115,30 +104,6 @@ st.markdown("""
         font-size: 2rem;
         font-weight: bold;
         color: #00d4ff;
-    }
-    
-    .drop-zone {
-        border: 3px dashed #3d5a80;
-        border-radius: 12px;
-        padding: 40px;
-        text-align: center;
-        color: #8892b0;
-        background: #16213e;
-        transition: all 0.3s ease;
-    }
-    .drop-zone:hover {
-        border-color: #00d4ff;
-        background: #1e3a5f;
-    }
-    
-    .mathml-box {
-        background: #0d1117;
-        border: 1px solid #30363d;
-        border-radius: 6px;
-        padding: 16px;
-        font-family: 'Consolas', monospace;
-        font-size: 0.85rem;
-        overflow-x: auto;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -152,48 +117,43 @@ if "selected_formula" not in st.session_state:
     st.session_state.selected_formula = None
 if "current_page" not in st.session_state:
     st.session_state.current_page = 0
-if "formula_results" not in st.session_state:
-    st.session_state.formula_results = {}
-if "cropped_images" not in st.session_state:
-    st.session_state.cropped_images = {}
-if "direct_image" not in st.session_state:
-    st.session_state.direct_image = None
-if "direct_result" not in st.session_state:
-    st.session_state.direct_result = None
+if "extraction_complete" not in st.session_state:
+    st.session_state.extraction_complete = False
 
 services = get_services()
 
 # ============================================================================
-# LEFT SIDEBAR
+# LEFT SIDEBAR - Upload & Formula List (like desktop)
 # ============================================================================
 with st.sidebar:
     st.markdown("### 📁 Upload")
     
-    # File uploader for PDF
+    # Single unified uploader for PDF or Image
     uploaded_file = st.file_uploader(
         "Drag and drop file here",
         type=["pdf", "png", "jpg", "jpeg"],
-        help="Upload PDF or image",
-        key="main_uploader"
+        help="Upload PDF document or equation image"
     )
     
     if uploaded_file:
         file_size = len(uploaded_file.getvalue()) / (1024 * 1024)
-        st.success(f"📄 {uploaded_file.name} ({file_size:.1f}MB)")
+        file_type = uploaded_file.type
         
-        # Load pages immediately
+        st.success(f"📄 {uploaded_file.name} ({file_size:.2f}MB)")
+        
+        # Track file changes
         file_id = f"{uploaded_file.name}_{uploaded_file.size}"
         if "current_file_id" not in st.session_state or st.session_state.current_file_id != file_id:
             st.session_state.current_file_id = file_id
             st.session_state.page_images = []
             st.session_state.formulas = []
-            st.session_state.formula_results = {}
-            st.session_state.cropped_images = {}
             st.session_state.selected_formula = None
+            st.session_state.extraction_complete = False
             
+            # Load document immediately (like desktop)
             with st.spinner("Loading document..."):
                 try:
-                    if uploaded_file.type == "application/pdf":
+                    if file_type == "application/pdf":
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                             tmp.write(uploaded_file.getvalue())
                             tmp_path = Path(tmp.name)
@@ -203,260 +163,237 @@ with st.sidebar:
                         st.session_state.page_images = [str(img) for img in images]
                         st.info(f"📄 Loaded {len(images)} page(s)")
                     else:
+                        # Direct image upload
                         image = Image.open(uploaded_file)
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
                             image.save(tmp.name, "PNG")
                         st.session_state.page_images = [tmp.name]
+                        st.info("🖼️ Image loaded")
                 except Exception as e:
                     st.error(f"Failed to load: {e}")
     
     st.markdown("---")
     
-    # Extract Formulas button
-    if st.session_state.page_images:
+    # Extract Formulas Button - Triggers full OCR pipeline (like desktop)
+    if st.session_state.page_images and not st.session_state.extraction_complete:
         if st.button("🔍 Extract Formulas", type="primary", use_container_width=True):
-            with st.spinner("Detecting formulas on all pages..."):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            all_formulas = []
+            total_pages = len(st.session_state.page_images)
+            
+            for page_idx, image_path in enumerate(st.session_state.page_images):
+                page_num = page_idx + 1
+                status_text.text(f"🔍 Detecting formulas on page {page_num}/{total_pages}...")
+                progress_bar.progress((page_idx) / total_pages)
+                
                 try:
-                    all_formulas = []
-                    for page_num, image_path in enumerate(st.session_state.page_images, 1):
-                        detected = services["detector"].detect_formulas(image_path)
-                        for formula in detected:
-                            if formula.get("w", 0) * formula.get("h", 0) > 100:
-                                formula["page"] = page_num
-                                formula["image_path"] = str(image_path)
-                                all_formulas.append(formula)
+                    # 1. Detect formula regions (like desktop)
+                    detected = services["detector"].detect_formulas(image_path)
                     
-                    st.session_state.formulas = all_formulas
-                    st.session_state.formula_results = {}
-                    st.session_state.cropped_images = {}
+                    # 2. Filter reasonable-sized formulas
+                    filtered = [f for f in detected if f.get("w", 0) * f.get("h", 0) > 200 
+                               and f.get("w", 0) > 30 and f.get("h", 0) > 10]
                     
-                    # Pre-crop all formula images for preview
-                    for idx, formula in enumerate(all_formulas):
+                    # 3. For each formula: Crop → OCR → MathML (like desktop run_detection)
+                    for idx, formula in enumerate(filtered):
+                        status_text.text(f"📝 Page {page_num}: Extracting formula {idx+1}/{len(filtered)}...")
+                        
                         try:
-                            crop_path = crop_image(Path(formula["image_path"]), formula)
-                            st.session_state.cropped_images[idx] = str(crop_path)
-                        except Exception:
-                            pass
-                    
-                    if all_formulas:
-                        st.session_state.selected_formula = 0
-                    
-                    st.success(f"Found {len(all_formulas)} formulas!")
-                    st.rerun()
+                            # Crop the formula region
+                            crop_path = crop_image(Path(image_path), formula)
+                            
+                            # OCR to LaTeX
+                            latex = services["latex_ocr"].image_to_latex(crop_path)
+                            
+                            # Convert to MathML
+                            mathml = services["latex_mathml"].convert(latex) if latex else ""
+                            
+                            # Check validity
+                            is_valid = bool(latex and mathml and "<math" in mathml)
+                            
+                            all_formulas.append({
+                                "page": page_num,
+                                "idx": idx + 1,
+                                "bbox": formula,
+                                "image_path": str(image_path),
+                                "crop_path": str(crop_path),
+                                "latex": latex or "",
+                                "mathml": mathml or "",
+                                "is_valid": is_valid
+                            })
+                        except Exception as e:
+                            logger.warning(f"Formula extraction failed: {e}")
+                            # Still add with error
+                            all_formulas.append({
+                                "page": page_num,
+                                "idx": idx + 1,
+                                "bbox": formula,
+                                "image_path": str(image_path),
+                                "crop_path": "",
+                                "latex": f"Error: {e}",
+                                "mathml": "",
+                                "is_valid": False
+                            })
+                            
                 except Exception as e:
-                    st.error(f"Error: {e}")
+                    logger.error(f"Detection failed on page {page_num}: {e}")
+            
+            progress_bar.progress(1.0)
+            status_text.text(f"✅ Extracted {len(all_formulas)} formulas!")
+            
+            st.session_state.formulas = all_formulas
+            st.session_state.extraction_complete = True
+            
+            if all_formulas:
+                st.session_state.selected_formula = 0
+            
+            st.rerun()
     
-    # Formula count and list with previews
+    # Formula Count & List (like desktop sidebar)
     if st.session_state.formulas:
         st.markdown("---")
         st.markdown(f"""
         <div class="formula-count">
-            <div style="color: #8892b0; font-size: 0.9rem;">📊 Formulas Found</div>
+            <div style="color: #8892b0;">📊 Formulas Found</div>
             <div class="number">{len(st.session_state.formulas)}</div>
         </div>
         """, unsafe_allow_html=True)
         
         st.markdown("### 📋 Formula List")
         
-        # Formula list with image previews
-        for idx, formula in enumerate(st.session_state.formulas):
+        # List each formula with preview image (like desktop FormulaListPanel)
+        for i, formula in enumerate(st.session_state.formulas):
+            is_selected = st.session_state.selected_formula == i
             page_num = formula.get("page", 1)
-            is_selected = st.session_state.selected_formula == idx
             
-            # Show preview image if available
-            col1, col2 = st.columns([1, 3])
+            col1, col2 = st.columns([1, 2])
+            
             with col1:
-                if idx in st.session_state.cropped_images:
+                # Show cropped image preview
+                if formula.get("crop_path") and Path(formula["crop_path"]).exists():
                     try:
-                        st.image(st.session_state.cropped_images[idx], width=50)
+                        st.image(formula["crop_path"], width=60)
                     except Exception:
                         st.markdown("📐")
                 else:
                     st.markdown("📐")
             
             with col2:
+                # Valid indicator
+                status = "✅" if formula.get("is_valid") else "⚠️"
                 btn_type = "primary" if is_selected else "secondary"
-                if st.button(f"Formula {idx+1} (P{page_num})", key=f"f_{idx}", use_container_width=True, type=btn_type):
-                    st.session_state.selected_formula = idx
+                
+                if st.button(f"{status} F{i+1} (P{page_num})", key=f"f_{i}", use_container_width=True, type=btn_type):
+                    st.session_state.selected_formula = i
                     st.rerun()
 
 # ============================================================================
-# MAIN AREA - Two columns
+# MAIN AREA - Preview & MathML Output
 # ============================================================================
 col_preview, col_right = st.columns([3, 2])
 
-# CENTER: Document Preview / Image Drop Zone
+# CENTER: Document/Page Preview
 with col_preview:
-    # Page selector for multi-page PDFs
-    if st.session_state.page_images and len(st.session_state.page_images) > 1:
-        page_options = list(range(1, len(st.session_state.page_images) + 1))
-        selected_page = st.selectbox(
-            "Page",
-            options=page_options,
-            index=st.session_state.current_page,
-            format_func=lambda x: f"Page {x} of {len(st.session_state.page_images)}"
-        )
-        st.session_state.current_page = selected_page - 1
+    st.markdown("### 📄 Document Preview")
     
-    # Display current page or drop zone
     if st.session_state.page_images:
-        current_img = st.session_state.page_images[st.session_state.current_page]
-        st.image(current_img, use_container_width=True)
+        # Multi-page navigation
+        if len(st.session_state.page_images) > 1:
+            page_num = st.selectbox(
+                "Page",
+                options=range(1, len(st.session_state.page_images) + 1),
+                index=st.session_state.current_page,
+                format_func=lambda x: f"Page {x} of {len(st.session_state.page_images)}"
+            )
+            st.session_state.current_page = page_num - 1
+        
+        # Show current page
+        st.image(st.session_state.page_images[st.session_state.current_page], use_container_width=True)
+        
+        # Show formula count for this page
+        page_formulas = [f for f in st.session_state.formulas if f.get("page") == st.session_state.current_page + 1]
+        if page_formulas:
+            st.info(f"📍 {len(page_formulas)} formula(s) detected on this page")
     else:
-        # Drop zone for direct image upload
         st.markdown("""
-        <div class="drop-zone">
-            <h2>📄 Drop Image Here</h2>
-            <p>Drag an equation image directly to extract MathML</p>
+        <div style="
+            border: 2px dashed #3d5a80;
+            border-radius: 12px;
+            padding: 60px 40px;
+            text-align: center;
+            color: #8892b0;
+        ">
+            <h2>📄 Document Preview</h2>
+            <p>Upload a PDF or image from the sidebar</p>
         </div>
         """, unsafe_allow_html=True)
-        
-        # Alternative: Direct image uploader in preview area
-        direct_image = st.file_uploader(
-            "Or click to upload equation image",
-            type=["png", "jpg", "jpeg"],
-            key="direct_upload",
-            label_visibility="collapsed"
-        )
-        
-        if direct_image:
-            st.session_state.direct_image = direct_image
-    
-    # Handle direct image upload for instant MathML - AUTO TRIGGER OCR
-    if st.session_state.direct_image and not st.session_state.page_images:
-        st.markdown("---")
-        st.markdown("### 🔍 Direct Equation Extraction")
-        
-        img = Image.open(st.session_state.direct_image)
-        st.image(img, caption="Uploaded Equation", use_container_width=True)
-        
-        # AUTO-TRIGGER: Extract immediately when image is uploaded
-        direct_img_id = f"{st.session_state.direct_image.name}_{st.session_state.direct_image.size}"
-        
-        if "last_direct_img_id" not in st.session_state or st.session_state.last_direct_img_id != direct_img_id:
-            st.session_state.last_direct_img_id = direct_img_id
-            st.session_state.direct_result = None  # Reset result for new image
-            
-            with st.spinner("🔄 Extracting LaTeX and MathML automatically..."):
-                try:
-                    # Save temp image
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
-                        img.save(tmp.name, "PNG")
-                        tmp_path = Path(tmp.name)
-                    
-                    # OCR
-                    latex = services["latex_ocr"].image_to_latex(tmp_path)
-                    mathml = services["latex_mathml"].convert(latex) if latex else ""
-                    
-                    st.session_state.direct_result = {
-                        "latex": latex or "OCR returned empty result",
-                        "mathml": mathml or ""
-                    }
-                    st.rerun()  # Refresh to show results
-                except Exception as e:
-                    st.session_state.direct_result = {
-                        "latex": f"Error: {e}",
-                        "mathml": ""
-                    }
-                    st.error(f"Extraction failed: {e}")
-        
-        # Show results
-        if st.session_state.direct_result:
-            result = st.session_state.direct_result
-            
-            st.success("✅ OCR Complete!")
-            
-            st.markdown("**📝 LaTeX:**")
-            st.code(result["latex"], language="latex")
-            
-            st.markdown("**📄 MathML:**")
-            if result["mathml"]:
-                st.code(result["mathml"], language="xml")
-            else:
-                st.warning("No MathML generated - check LaTeX output")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                if result["latex"]:
-                    st.download_button("📥 Download LaTeX", result["latex"], "equation.tex", "text/plain", key="dl_direct_latex")
-            with col2:
-                if result["mathml"]:
-                    st.download_button("📥 Download MathML", result["mathml"], "equation.mml", "application/xml", key="dl_direct_mathml")
 
-# RIGHT: Formula Details
+# RIGHT: Formula Details / MathML Output (like desktop PreviewPanel)
 with col_right:
-    st.markdown("### 📐 Formula Details")
+    st.markdown("### 📐 MathML Output")
     
     if st.session_state.selected_formula is not None and st.session_state.formulas:
-        idx = st.session_state.selected_formula
-        formula = st.session_state.formulas[idx]
+        formula = st.session_state.formulas[st.session_state.selected_formula]
         
-        # ---- Cropped Region ----
+        # Cropped Region (like desktop)
         st.markdown("**Cropped Region:**")
-        if idx in st.session_state.cropped_images:
-            st.image(st.session_state.cropped_images[idx], use_container_width=True)
+        if formula.get("crop_path") and Path(formula["crop_path"]).exists():
+            st.image(formula["crop_path"], use_container_width=True)
+        else:
+            st.info("No crop available")
         
         st.markdown("---")
         
-        # ---- Get/Compute LaTeX & MathML ----
-        cache_key = f"formula_{idx}"
-        if cache_key not in st.session_state.formula_results:
-            with st.spinner("Extracting LaTeX & MathML..."):
-                try:
-                    crop_path = st.session_state.cropped_images.get(idx)
-                    if crop_path:
-                        latex = services["latex_ocr"].image_to_latex(crop_path)
-                        mathml = services["latex_mathml"].convert(latex) if latex else ""
-                        st.session_state.formula_results[cache_key] = {
-                            "latex": latex or "",
-                            "mathml": mathml or ""
-                        }
-                    else:
-                        st.session_state.formula_results[cache_key] = {"latex": "", "mathml": ""}
-                except Exception as e:
-                    st.session_state.formula_results[cache_key] = {
-                        "latex": f"Error: {e}",
-                        "mathml": ""
-                    }
-        
-        result = st.session_state.formula_results.get(cache_key, {})
-        latex = result.get("latex", "")
-        mathml = result.get("mathml", "")
-        
-        # ---- LaTeX ----
+        # LaTeX Output
         st.markdown("**📝 LaTeX:**")
-        st.code(latex if latex else "No LaTeX extracted", language="latex")
+        latex = formula.get("latex", "")
+        if latex:
+            st.code(latex, language="latex")
+        else:
+            st.warning("No LaTeX extracted")
         
-        # ---- MathML ----
+        # MathML Output (main feature!)
         st.markdown("**📄 MathML:**")
+        mathml = formula.get("mathml", "")
         if mathml:
             st.code(mathml, language="xml")
+            
+            # Validation status
+            if formula.get("is_valid"):
+                st.success("✅ Valid MathML")
+            else:
+                st.warning("⚠️ MathML may have issues")
         else:
-            st.info("No MathML generated")
+            st.error("❌ No MathML generated")
         
-        # ---- Download buttons ----
+        # Download buttons
         st.markdown("---")
         col1, col2 = st.columns(2)
         with col1:
             if latex:
                 st.download_button(
-                    "📥 LaTeX",
+                    "📥 Download LaTeX",
                     latex,
-                    f"formula_{idx+1}.tex",
+                    f"formula_{st.session_state.selected_formula + 1}.tex",
                     "text/plain",
-                    key=f"dl_latex_{idx}"
+                    key="dl_latex"
                 )
         with col2:
             if mathml:
                 st.download_button(
-                    "📥 MathML",
+                    "📥 Download MathML",
                     mathml,
-                    f"formula_{idx+1}.mml",
+                    f"formula_{st.session_state.selected_formula + 1}.mml",
                     "application/xml",
-                    key=f"dl_mathml_{idx}"
+                    key="dl_mathml"
                 )
     
-    elif not st.session_state.formulas and not st.session_state.direct_result:
+    elif st.session_state.extraction_complete and not st.session_state.formulas:
+        st.info("No formulas detected in the document")
+    
+    elif not st.session_state.page_images:
         st.markdown("""
         <div style="
             border: 2px dashed #3d5a80;
@@ -465,9 +402,14 @@ with col_right:
             text-align: center;
             color: #8892b0;
         ">
-            <h3>📐 MathML Output</h3>
-            <p>1. Upload a PDF or drag an equation image</p>
-            <p>2. Click Extract Formulas</p>
-            <p>3. Select a formula to see results</p>
+            <p><strong>Steps:</strong></p>
+            <ol style="text-align: left; display: inline-block;">
+                <li>Upload PDF or image (sidebar)</li>
+                <li>Click "Extract Formulas"</li>
+                <li>Select formula to see MathML</li>
+            </ol>
         </div>
         """, unsafe_allow_html=True)
+    
+    else:
+        st.info("👆 Click 'Extract Formulas' to detect equations")
