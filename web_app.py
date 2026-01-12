@@ -139,6 +139,8 @@ if hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
     except Exception:
         pass
 
+st.toast("System Version: 2.5 (Fixed)", icon="✅")
+
 # ============================================================================
 # LEFT SIDEBAR - Upload & Formula List (like desktop)
 # ============================================================================
