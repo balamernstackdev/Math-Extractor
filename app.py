@@ -3,6 +3,17 @@ from __future__ import annotations
 
 import sys
 import os
+
+# ----------------------------------------------------------------------------
+# STREAMLIT CLOUD DETECTION
+# Streamlit Cloud sets STREAMLIT_SHARING_MODE or runs from /mount/src/
+# Redirect to web_app.py for cloud deployment (PyQt6 doesn't work on cloud)
+# ----------------------------------------------------------------------------
+if os.environ.get("STREAMLIT_SHARING_MODE") or "/mount/src/" in os.getcwd():
+    # Run web_app.py instead - it uses Streamlit (no PyQt6)
+    import runpy
+    runpy.run_module("web_app", run_name="__main__")
+    sys.exit(0)
 import warnings
 from pathlib import Path
 from typing import Optional
