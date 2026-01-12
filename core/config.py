@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass
+from typing import Optional
 from pathlib import Path
 
 # PyInstaller support: detect if running as executable
@@ -149,8 +150,8 @@ class Settings:
         or _load_tesseract_from_config() 
         or _find_tesseract_path()
     )
-    poppler_path: Path | None = _find_poppler_path()
-    openai_api_key: str | None = os.getenv("OPENAI_API_KEY")    
+    poppler_path: Optional[Path] = _find_poppler_path()
+    openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")    
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")    
     use_openai_fallback: bool = os.getenv("USE_OPENAI_FALLBACK", "false").lower() == "true"
     # Performance: Fast mode skips OpenAI for low-corruption equations

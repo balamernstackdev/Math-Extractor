@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 import re
 
 import pytesseract
@@ -488,7 +488,7 @@ class ImageToLatex:
             else:
                 logger.warning("Tesseract OCR not found. OCR functionality will not work.")
 
-    def image_to_latex(self, image_path: str | Path, handwriting_mode: bool = False, table_mode: bool = False) -> str:
+    def image_to_latex(self, image_path: Union[str, Path], handwriting_mode: bool = False, table_mode: bool = False) -> str:
         """Perform OCR on an image and return LaTeX-like text.
         
         Args:
@@ -1064,7 +1064,7 @@ class ImageToLatex:
         # This method now returns raw OCR output immediately - no OpenAI calls
         return ocr_text
 
-    def _try_openai_vision_fallback(self, image, table_mode: bool = False, handwriting_mode: bool = False) -> str | None:
+    def _try_openai_vision_fallback(self, image, table_mode: bool = False, handwriting_mode: bool = False) -> Optional[str]:
         """
         FALLBACK: Use GPT-4o Vision when local OCR fails completely.
         This provides a safety net for complex equations that pix2tex misses.
