@@ -290,57 +290,68 @@ with st.sidebar:
         
         # Size display
         st.caption(f"Size: {file_size * 1024:.1f} KB")
-    
-    st.markdown("---")
-    
-    # Extract Formulas button (orange)
-    if st.session_state.uploaded_file:
-        if st.button("🔍 Extract Formulas", type="primary", use_container_width=True):
-            with st.spinner("Extracting formulas..."):
+        
+        # =====================================================================
+        # IMMEDIATE PDF PREVIEW: Render pages as soon as file is uploaded
+        # =====================================================================
+        file_id = f"{uploaded_file.name}_{uploaded_file.size}"
+        if "current_file_id" not in st.session_state or st.session_state.current_file_id != file_id:
+            # New file uploaded - render preview
+            st.session_state.current_file_id = file_id
+            st.session_state.page_images = []
+            st.session_state.formulas = []
+            st.session_state.selected_formula = None
+            st.session_state.formula_results = {}
+            
+            with st.spinner("Loading preview..."):
                 try:
-                    file_type = st.session_state.uploaded_file.type
+                    file_type = uploaded_file.type
                     
                     if file_type == "application/pdf":
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                            tmp_file.write(st.session_state.uploaded_file.getvalue())
+                            tmp_file.write(uploaded_file.getvalue())
                             tmp_path = Path(tmp_file.name)
                         
                         pages = services["pdf_reader"].read_pdf(tmp_path)
                         images = services["pdf_renderer"].render_pages(pages)
                         st.session_state.page_images = [str(img) for img in images]
-                        
-                        all_formulas = []
-                        for page_num, image_path in enumerate(images, 1):
-                            detected = services["detector"].detect_formulas(image_path)
-                            for formula in detected:
-                                if formula.get("w", 0) * formula.get("h", 0) > 100:
-                                    formula["page"] = page_num
-                                    formula["image_path"] = str(image_path)
-                                    all_formulas.append(formula)
-                        
-                        st.session_state.formulas = all_formulas
-                        tmp_path.unlink()
+                        st.session_state.tmp_pdf_path = str(tmp_path)
                     else:
-                        image = Image.open(st.session_state.uploaded_file)
+                        # Image file
+                        image = Image.open(uploaded_file)
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_file:
                             image.save(tmp_file.name, "PNG")
                             tmp_path = Path(tmp_file.name)
-                        
                         st.session_state.page_images = [str(tmp_path)]
                         
-                        detected = services["detector"].detect_formulas(tmp_path)
-                        all_formulas = []
+                except Exception as e:
+                    st.error(f"Failed to load preview: {e}")
+    
+    st.markdown("---")
+    
+    # Extract Formulas button (orange)
+    if st.session_state.uploaded_file and st.session_state.page_images:
+        if st.button("🔍 Extract Formulas", type="primary", use_container_width=True):
+            with st.spinner("Detecting formulas..."):
+                try:
+                    all_formulas = []
+                    for page_num, image_path in enumerate(st.session_state.page_images, 1):
+                        detected = services["detector"].detect_formulas(image_path)
                         for formula in detected:
                             if formula.get("w", 0) * formula.get("h", 0) > 100:
-                                formula["page"] = 1
-                                formula["image_path"] = str(tmp_path)
+                                formula["page"] = page_num
+                                formula["image_path"] = str(image_path)
                                 all_formulas.append(formula)
-                        
-                        st.session_state.formulas = all_formulas
+                    
+                    st.session_state.formulas = all_formulas
+                    st.session_state.formula_results = {}
                     
                     # Select first formula by default
                     if st.session_state.formulas:
                         st.session_state.selected_formula = 0
+                    
+                    st.success(f"Found {len(all_formulas)} formulas!")
+                    st.rerun()
                         
                 except Exception as e:
                     st.error(f"Error: {e}")
