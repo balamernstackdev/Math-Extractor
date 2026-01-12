@@ -377,21 +377,53 @@ class ImageToLatex:
                 if os.path.exists(cache_weights):
                     log_debug(f"Found cached weights at: {cache_weights}")
                     # Manually construct args to force loading from our cache
-                    # Resolution: Find absolute path to config
+                    # Resolution: Manually generate config to avoid 'app.py' or missing file errors
                     import pix2tex
+                    import yaml
                     base_path = os.path.dirname(pix2tex.__file__)
-                    abs_config = os.path.join(base_path, 'model', 'settings', 'config.yaml')
+                    
+                    # Attempt to locate tokenizer in site-packages
+                    tokenizer_path = os.path.join(base_path, 'model', 'dataset', 'tokenizer.json')
+                    if not os.path.exists(tokenizer_path):
+                        log_debug(f"Tokenizer not found at {tokenizer_path}, checking alternate...")
+                        tokenizer_path = os.path.join(base_path, 'tokenizer.json')
+                    
+                    log_debug(f"Using Tokenizer path: {tokenizer_path}")
+                    
+                    # Standard config for ViT-Hybrid (default pix2tex)
+                    # We hardcode this to ensure stability against missing package files
+                    config_dict = {
+                        'backbone_layers': [2, 3, 7],
+                        'channels': 1,
+                        'dim': 256,
+                        'encoder_structure': 'hybrid',
+                        'decoder_args': {'attn_on_attn': True, 'cross_attend': True, 'num_head': 8, 'num_layers': 1},
+                        'max_seq_len': 512,
+                        'max_dimensions': [1024, 2048],
+                        'min_dimensions': [32, 32],
+                        'patch_size': 16,
+                        'pad': False,
+                        'tokenizer': str(tokenizer_path)
+                    }
+                    
+                    # Write temp config
+                    fd, temp_cfg = tempfile.mkstemp(suffix=".yaml", text=True)
+                    with os.fdopen(fd, 'w') as f:
+                        yaml.dump(config_dict, f)
+                    
+                    log_debug(f"Generated temp config at: {temp_cfg}")
                     
                     args = munch.Munch({
-                        'config': abs_config, 
+                        'config': temp_cfg, 
                         'checkpoint': cache_weights,
                         'no_cuda': True,
                         'no_resize': False
                     })
+                    
                     self.math_ocr = LatexOCR(arguments=args)
-                else:
-                    log_debug(f"Cached weights missing at {cache_weights}. Using default (might crash)...")
-                    self.math_ocr = LatexOCR()
+                    
+                    # Cleanup later? (OS handles temp usually, but explicit is nice)
+                    # We leave it for now to avoid premature deletion
 
             self.has_math_ocr = True
             logger.info("Math OCR (pix2tex) initialized successfully")
