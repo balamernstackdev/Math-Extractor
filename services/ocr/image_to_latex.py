@@ -1086,9 +1086,11 @@ class ImageToLatex:
                 
             converter = OpenAIMathMLConverter(api_key=api_key)
             return converter.convert_image_to_latex(image, table_mode=table_mode, handwriting_mode=handwriting_mode)
-        except ImportError:
+        except ImportError as ie:
+            logger.warning(f"Validation Warning: OpenAI Vision Fallback failed (ImportError): {ie}")
             return None
-        except Exception:
+        except Exception as e:
+            logger.error(f"Validation Warning: OpenAI Vision Fallback failed (Exception): {e}")
             return None
     
     def _is_corrupted_ocr_output(self, text: str) -> bool:

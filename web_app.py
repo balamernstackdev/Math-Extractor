@@ -129,6 +129,27 @@ services = get_services()
 # LEFT SIDEBAR - Upload & Formula List (like desktop)
 # ============================================================================
 with st.sidebar:
+    # DEBUG INFO
+    with st.expander("🔧 Debug / Diagnostics"):
+        import os
+        from core.config import settings
+        
+        has_env_key = bool(os.getenv("OPENAI_API_KEY"))
+        has_conf_key = bool(settings.openai_api_key)
+        
+        st.write(f"**OpenAI Key (Env):** {'✅ Set' if has_env_key else '❌ Missing'}")
+        st.write(f"**OpenAI Key (Conf):** {'✅ Set' if has_conf_key else '❌ Missing'}")
+        
+        if st.toggle("Show System Logs"):
+             try:
+                 with open("mathpix_debug.log", "r") as f:
+                     st.code(f.read()[-2000:], language="text")
+             except FileNotFoundError:
+                 st.info("Log file not found")
+
+        if st.button("Reload Config"):
+            st.rerun()
+
     st.markdown("### 📁 Upload")
     
     # Single unified uploader for PDF or Image
