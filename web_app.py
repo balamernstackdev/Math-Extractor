@@ -1,8 +1,30 @@
 """Streamlit web application for MathPix Clone - Free deployment option."""
 from __future__ import annotations
 
-import io
+import os
 import tempfile
+
+# -------------------------------------------------------------------------
+# CRITICAL: Set writable cache directories BEFORE importing ML libraries
+# Streamlit Cloud's venv is read-only, so pix2tex can't download weights there
+# -------------------------------------------------------------------------
+_cache_dir = os.path.join(tempfile.gettempdir(), "mathpix_cache")
+os.makedirs(_cache_dir, exist_ok=True)
+
+# Set all ML-related cache paths to writable location
+os.environ["HF_HOME"] = os.path.join(_cache_dir, "huggingface")
+os.environ["TORCH_HOME"] = os.path.join(_cache_dir, "torch")
+os.environ["TIMM_CACHE"] = os.path.join(_cache_dir, "timm")
+os.environ["XDG_CACHE_HOME"] = _cache_dir  # General fallback
+
+# pix2tex specific - force checkpoint download to writable location
+os.environ["PIX2TEX_CACHE"] = os.path.join(_cache_dir, "pix2tex")
+
+# Suppress warnings
+os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+import io
 from pathlib import Path
 from typing import List
 

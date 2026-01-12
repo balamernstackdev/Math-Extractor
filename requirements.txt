@@ -9,7 +9,7 @@ python-multipart
 # -------------------------
 # UI
 # -------------------------
-PyQt6
+# PyQt6  # Desktop only - not for Streamlit Cloud
 streamlit
 
 # -------------------------
@@ -27,7 +27,8 @@ pymupdf  # PyMuPDF for PDF processing
 latex2mathml
 pix2tex
 numpy
-PyQt6-WebEngine
+lxml  # For MathML parsing
+# PyQt6-WebEngine  # Desktop only - not for Streamlit Cloud
 
 # -------------------------
 # ML / AI

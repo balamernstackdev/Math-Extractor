@@ -196,6 +196,20 @@ class ImageToLatex:
                 log_debug(f"Dependency check: FAILED to import transformers: {e}")
                 raise e
 
+            # CRITICAL: Monkey-patch pix2tex checkpoint path BEFORE import
+            # pix2tex tries to write to its package directory which is read-only on Streamlit Cloud
+            pix2tex_cache = os.path.join(temp_dir, "mathpix_cache", "pix2tex")
+            os.makedirs(pix2tex_cache, exist_ok=True)
+            
+            try:
+                # Patch the get_latest_checkpoint module before LatexOCR import
+                import pix2tex.model.checkpoints.get_latest_checkpoint as ckpt_module
+                original_path = ckpt_module.path if hasattr(ckpt_module, 'path') else None
+                ckpt_module.path = pix2tex_cache
+                log_debug(f"Patched pix2tex checkpoint path: {original_path} -> {pix2tex_cache}")
+            except Exception as patch_err:
+                log_debug(f"Could not patch pix2tex checkpoint path: {patch_err}")
+
             from pix2tex.cli import LatexOCR
             import munch
             from utils.resource_utils import get_resource_path
