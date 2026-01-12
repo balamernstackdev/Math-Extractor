@@ -151,6 +151,8 @@ with st.sidebar:
             st.session_state.formulas = []
             st.session_state.selected_formula = None
             st.session_state.extraction_complete = False
+            st.session_state.current_page = 0
+            st.session_state.manual_snip_result = None
             
             # Load document immediately (like desktop)
             with st.spinner("Loading document..."):
@@ -178,7 +180,7 @@ with st.sidebar:
     
     # Extract Formulas Button - Triggers full OCR pipeline (like desktop)
     if st.session_state.page_images and not st.session_state.extraction_complete:
-        if st.button("🔍 Extract Formulas", type="primary", use_container_width=True):
+        if st.button("🔍 Extract Formulas", type="primary", width="stretch"):
             progress_bar = st.progress(0)
             status_text = st.empty()
             
@@ -287,7 +289,7 @@ with st.sidebar:
                 status = "✅" if formula.get("is_valid") else "⚠️"
                 btn_type = "primary" if is_selected else "secondary"
                 
-                if st.button(f"{status} F{i+1} (P{page_num})", key=f"f_{i}", use_container_width=True, type=btn_type):
+                if st.button(f"{status} F{i+1} (P{page_num})", key=f"f_{i}", width="stretch", type=btn_type):
                     st.session_state.selected_formula = i
                     st.rerun()
 
@@ -298,8 +300,6 @@ col_preview, col_right = st.columns([3, 2])
 
 # CENTER: Document/Page Preview
 with col_preview:
-    st.markdown("### 📄 Document Preview")
-    
     st.markdown("### 📄 Document Preview")
     
     if st.session_state.page_images:
@@ -320,7 +320,11 @@ with col_preview:
                 st.markdown(f"<p style='padding-top: 32px;'>of {len(st.session_state.page_images)} pages</p>", unsafe_allow_html=True)
         
         # Show current page
-        st.image(st.session_state.page_images[st.session_state.current_page], use_container_width=True)
+        if st.session_state.current_page < len(st.session_state.page_images):
+            st.image(st.session_state.page_images[st.session_state.current_page], width="stretch")
+        else:
+            st.session_state.current_page = 0
+            st.rerun()
         
         # Show formula count for this page
         page_formulas = [f for f in st.session_state.formulas if f.get("page") == st.session_state.current_page + 1]
@@ -397,7 +401,7 @@ with col_right:
         
         # Cropped Region (like desktop)
         if formula.get("crop_path") and Path(formula["crop_path"]).exists():
-            st.image(formula["crop_path"], use_container_width=True)
+            st.image(formula["crop_path"], width="stretch")
         
         st.markdown("**📝 LaTeX:**")
         latex = formula.get("latex", "")
