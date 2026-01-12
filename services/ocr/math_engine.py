@@ -598,6 +598,7 @@ class ImageToLatex:
             handwriting_mode: If True, bypass local OCR and force Vision API (better for handwriting)
             table_mode: If True, bypass local OCR and force Vision API (optimized for tables)
         """
+        latex_result = None
         path = Path(image_path)
         if not path.exists():
             raise FileNotFoundError(f"OCR image not found: {path}")
@@ -773,8 +774,9 @@ class ImageToLatex:
         # Add Raw Snippet for Regex debugging
         # Escape curly braces for LaTeX
         import re
-        raw_safe = re.sub(r'([{}])', r'\\\1', latex_result[:50])
-        debug_tags.append(f"Raw: {raw_safe}...")
+        if latex_result:
+            raw_safe = re.sub(r'([{}])', r'\\\1', latex_result[:50])
+            debug_tags.append(f"Raw: {raw_safe}...")
         
         final_output = cleaned if cleaned else r"\text{OCR failed}"
         if debug_tags:
