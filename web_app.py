@@ -322,7 +322,7 @@ with col_preview:
         if direct_image:
             st.session_state.direct_image = direct_image
     
-    # Handle direct image upload for instant MathML
+    # Handle direct image upload for instant MathML - AUTO TRIGGER OCR
     if st.session_state.direct_image and not st.session_state.page_images:
         st.markdown("---")
         st.markdown("### 🔍 Direct Equation Extraction")
@@ -330,8 +330,14 @@ with col_preview:
         img = Image.open(st.session_state.direct_image)
         st.image(img, caption="Uploaded Equation", use_container_width=True)
         
-        if st.button("📐 Extract MathML", type="primary"):
-            with st.spinner("Extracting LaTeX and MathML..."):
+        # AUTO-TRIGGER: Extract immediately when image is uploaded
+        direct_img_id = f"{st.session_state.direct_image.name}_{st.session_state.direct_image.size}"
+        
+        if "last_direct_img_id" not in st.session_state or st.session_state.last_direct_img_id != direct_img_id:
+            st.session_state.last_direct_img_id = direct_img_id
+            st.session_state.direct_result = None  # Reset result for new image
+            
+            with st.spinner("🔄 Extracting LaTeX and MathML automatically..."):
                 try:
                     # Save temp image
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
@@ -343,27 +349,39 @@ with col_preview:
                     mathml = services["latex_mathml"].convert(latex) if latex else ""
                     
                     st.session_state.direct_result = {
-                        "latex": latex or "",
+                        "latex": latex or "OCR returned empty result",
                         "mathml": mathml or ""
                     }
+                    st.rerun()  # Refresh to show results
                 except Exception as e:
+                    st.session_state.direct_result = {
+                        "latex": f"Error: {e}",
+                        "mathml": ""
+                    }
                     st.error(f"Extraction failed: {e}")
         
         # Show results
         if st.session_state.direct_result:
             result = st.session_state.direct_result
             
+            st.success("✅ OCR Complete!")
+            
             st.markdown("**📝 LaTeX:**")
             st.code(result["latex"], language="latex")
             
             st.markdown("**📄 MathML:**")
-            st.code(result["mathml"], language="xml")
+            if result["mathml"]:
+                st.code(result["mathml"], language="xml")
+            else:
+                st.warning("No MathML generated - check LaTeX output")
             
             col1, col2 = st.columns(2)
             with col1:
-                st.download_button("📥 Download LaTeX", result["latex"], "equation.tex", "text/plain")
+                if result["latex"]:
+                    st.download_button("📥 Download LaTeX", result["latex"], "equation.tex", "text/plain", key="dl_direct_latex")
             with col2:
-                st.download_button("📥 Download MathML", result["mathml"], "equation.mml", "application/xml")
+                if result["mathml"]:
+                    st.download_button("📥 Download MathML", result["mathml"], "equation.mml", "application/xml", key="dl_direct_mathml")
 
 # RIGHT: Formula Details
 with col_right:
