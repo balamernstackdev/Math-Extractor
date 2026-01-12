@@ -119,6 +119,8 @@ if "current_page" not in st.session_state:
     st.session_state.current_page = 0
 if "extraction_complete" not in st.session_state:
     st.session_state.extraction_complete = False
+if "manual_snip_result" not in st.session_state:
+    st.session_state.manual_snip_result = None
 
 services = get_services()
 
@@ -298,16 +300,24 @@ col_preview, col_right = st.columns([3, 2])
 with col_preview:
     st.markdown("### 📄 Document Preview")
     
+    st.markdown("### 📄 Document Preview")
+    
     if st.session_state.page_images:
-        # Multi-page navigation
+        # Multi-page navigation - MORE PROMINENT
         if len(st.session_state.page_images) > 1:
-            page_num = st.selectbox(
-                "Page",
-                options=range(1, len(st.session_state.page_images) + 1),
-                index=st.session_state.current_page,
-                format_func=lambda x: f"Page {x} of {len(st.session_state.page_images)}"
-            )
-            st.session_state.current_page = page_num - 1
+            col_p1, col_p2 = st.columns([1, 1])
+            with col_p1:
+                page_num = st.number_input(
+                    "Page",
+                    min_value=1,
+                    max_value=len(st.session_state.page_images),
+                    value=st.session_state.current_page + 1,
+                    step=1,
+                    key="page_input"
+                )
+                st.session_state.current_page = page_num - 1
+            with col_p2:
+                st.markdown(f"<p style='padding-top: 32px;'>of {len(st.session_state.page_images)} pages</p>", unsafe_allow_html=True)
         
         # Show current page
         st.image(st.session_state.page_images[st.session_state.current_page], use_container_width=True)
@@ -315,7 +325,9 @@ with col_preview:
         # Show formula count for this page
         page_formulas = [f for f in st.session_state.formulas if f.get("page") == st.session_state.current_page + 1]
         if page_formulas:
-            st.info(f"📍 {len(page_formulas)} formula(s) detected on this page")
+            st.success(f"📍 {len(page_formulas)} formula(s) detected on this page")
+        else:
+            st.info("No formulas detected on this page yet. Click 'Extract Formulas' in the sidebar.")
     else:
         st.markdown("""
         <div style="
@@ -334,33 +346,67 @@ with col_preview:
 with col_right:
     st.markdown("### 📐 MathML Output")
     
+    # -------------------------------------------------------------------------
+    # OPTION A: MANUAL SNIP UPLOAD (Simulates "Drag to Select")
+    # -------------------------------------------------------------------------
+    st.markdown("#### ✂️ Manual Snip Upload")
+    manual_snip = st.file_uploader(
+        "Drop a manual snip (screenshot) here for instant MathML:",
+        type=["png", "jpg", "jpeg"],
+        key="manual_snip_uploader"
+    )
+    
+    if manual_snip:
+        # Auto-process manual snip
+        snip_id = f"{manual_snip.name}_{manual_snip.size}"
+        if "last_snip_id" not in st.session_state or st.session_state.last_snip_id != snip_id:
+            st.session_state.last_snip_id = snip_id
+            with st.spinner("Processing manual snip..."):
+                try:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+                        tmp.write(manual_snip.getvalue())
+                        tmp_path = Path(tmp.name)
+                    
+                    latex = services["latex_ocr"].image_to_latex(tmp_path)
+                    mathml = services["latex_mathml"].convert(latex) if latex else ""
+                    st.session_state.manual_snip_result = {
+                        "latex": latex or "",
+                        "mathml": mathml or "",
+                        "is_valid": bool(latex and mathml and "<math" in mathml)
+                    }
+                except Exception as e:
+                    st.error(f"Manual snip failed: {e}")
+    
+    if st.session_state.manual_snip_result:
+        st.markdown("---")
+        st.markdown("**🔍 Manual Snip Result:**")
+        res = st.session_state.manual_snip_result
+        st.code(res["latex"], language="latex")
+        if res["mathml"]:
+            st.code(res["mathml"], language="xml")
+            st.download_button("📥 Download Snip MathML", res["mathml"], "snip_formula.mml", "application/xml")
+        st.markdown("---")
+
+    # -------------------------------------------------------------------------
+    # OPTION B: DETECTED FORMULAS (From Sidebar Extract)
+    # -------------------------------------------------------------------------
     if st.session_state.selected_formula is not None and st.session_state.formulas:
         formula = st.session_state.formulas[st.session_state.selected_formula]
         
+        st.markdown(f"#### 📍 Formula {st.session_state.selected_formula + 1} (Page {formula.get('page')})")
+        
         # Cropped Region (like desktop)
-        st.markdown("**Cropped Region:**")
         if formula.get("crop_path") and Path(formula["crop_path"]).exists():
             st.image(formula["crop_path"], use_container_width=True)
-        else:
-            st.info("No crop available")
         
-        st.markdown("---")
-        
-        # LaTeX Output
         st.markdown("**📝 LaTeX:**")
         latex = formula.get("latex", "")
-        if latex:
-            st.code(latex, language="latex")
-        else:
-            st.warning("No LaTeX extracted")
+        st.code(latex if latex else "No LaTeX extracted", language="latex")
         
-        # MathML Output (main feature!)
         st.markdown("**📄 MathML:**")
         mathml = formula.get("mathml", "")
         if mathml:
             st.code(mathml, language="xml")
-            
-            # Validation status
             if formula.get("is_valid"):
                 st.success("✅ Valid MathML")
             else:
@@ -369,47 +415,13 @@ with col_right:
             st.error("❌ No MathML generated")
         
         # Download buttons
-        st.markdown("---")
         col1, col2 = st.columns(2)
         with col1:
             if latex:
-                st.download_button(
-                    "📥 Download LaTeX",
-                    latex,
-                    f"formula_{st.session_state.selected_formula + 1}.tex",
-                    "text/plain",
-                    key="dl_latex"
-                )
+                st.download_button("📥 LaTeX", latex, f"f{st.session_state.selected_formula+1}.tex", "text/plain")
         with col2:
             if mathml:
-                st.download_button(
-                    "📥 Download MathML",
-                    mathml,
-                    f"formula_{st.session_state.selected_formula + 1}.mml",
-                    "application/xml",
-                    key="dl_mathml"
-                )
+                st.download_button("📥 MathML", mathml, f"f{st.session_state.selected_formula+1}.mml", "application/xml")
     
-    elif st.session_state.extraction_complete and not st.session_state.formulas:
-        st.info("No formulas detected in the document")
-    
-    elif not st.session_state.page_images:
-        st.markdown("""
-        <div style="
-            border: 2px dashed #3d5a80;
-            border-radius: 12px;
-            padding: 40px 20px;
-            text-align: center;
-            color: #8892b0;
-        ">
-            <p><strong>Steps:</strong></p>
-            <ol style="text-align: left; display: inline-block;">
-                <li>Upload PDF or image (sidebar)</li>
-                <li>Click "Extract Formulas"</li>
-                <li>Select formula to see MathML</li>
-            </ol>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    else:
-        st.info("👆 Click 'Extract Formulas' to detect equations")
+    elif not st.session_state.extraction_complete:
+        st.info("👆 Click 'Extract Formulas' in the sidebar to auto-detect every equation on the PDF, OR upload a manual snip above.")
