@@ -354,7 +354,8 @@ with col_preview:
                                 "latex": latex or "",
                                 "mathml": mathml or "",
                                 "is_valid": bool(latex and mathml and "<math" in mathml),
-                                "is_crop": True # Flag to show it's from current page crop
+                                "is_crop": True,
+                                "image": cropped_img # Store the PIL image
                             }
                         except Exception as e:
                             st.error(f"Crop OCR failed: {e}")
@@ -414,17 +415,32 @@ with col_right:
                     st.session_state.manual_snip_result = {
                         "latex": latex or "",
                         "mathml": mathml or "",
-                        "is_valid": bool(latex and mathml and "<math" in mathml)
+                        "is_valid": bool(latex and mathml and "<math" in mathml),
+                        "image": Image.open(tmp_path) # Store the image
                     }
                 except Exception as e:
                     st.error(f"Manual snip failed: {e}")
     
     if st.session_state.manual_snip_result:
         st.markdown("---")
-        st.markdown("**🔍 Manual Snip Result:**")
+        st.markdown("#### 🔍 Manual Snip Result")
         res = st.session_state.manual_snip_result
-        st.code(res["latex"], language="latex")
-        if res["mathml"]:
+        
+        # 1. Image Overview
+        if "image" in res:
+            st.markdown("**🖼️ Image Overview:**")
+            st.image(res["image"], width="stretch")
+        
+        # 2. Equation Rendering
+        if res.get("latex"):
+            st.markdown("**✨ Equation Rendering:**")
+            st.latex(res["latex"])
+            
+            st.markdown("**📝 LaTeX Code:**")
+            st.code(res["latex"], language="latex")
+            
+        if res.get("mathml"):
+            st.markdown("**📄 MathML Code:**")
             st.code(res["mathml"], language="xml")
             st.download_button("📥 Download Snip MathML", res["mathml"], "snip_formula.mml", "application/xml")
         st.markdown("---")
@@ -437,15 +453,24 @@ with col_right:
         
         st.markdown(f"#### 📍 Formula {st.session_state.selected_formula + 1} (Page {formula.get('page')})")
         
-        # Cropped Region (like desktop)
+        # 1. Image Overview (Cropped Region)
         if formula.get("crop_path") and Path(formula["crop_path"]).exists():
+            st.markdown("**🖼️ Image Overview:**")
             st.image(formula["crop_path"], width="stretch")
         
-        st.markdown("**📝 LaTeX:**")
+        # 2. Equation Rendering
         latex = formula.get("latex", "")
-        st.code(latex if latex else "No LaTeX extracted", language="latex")
+        if latex:
+            st.markdown("**✨ Equation Rendering:**")
+            st.latex(latex)
+            
+            st.markdown("**📝 LaTeX Code:**")
+            st.code(latex, language="latex")
+        else:
+            st.warning("No LaTeX extracted")
         
-        st.markdown("**📄 MathML:**")
+        # 3. MathML
+        st.markdown("**📄 MathML Code:**")
         mathml = formula.get("mathml", "")
         if mathml:
             st.code(mathml, language="xml")
