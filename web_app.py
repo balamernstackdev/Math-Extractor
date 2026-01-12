@@ -436,9 +436,6 @@ with col_right:
             st.markdown("**✨ Equation Rendering:**")
             st.latex(res["latex"])
             
-            st.markdown("**📝 LaTeX Code:**")
-            st.code(res["latex"], language="latex")
-            
         if res.get("mathml"):
             st.markdown("**📄 MathML Code:**")
             st.code(res["mathml"], language="xml")
@@ -463,9 +460,6 @@ with col_right:
         if latex:
             st.markdown("**✨ Equation Rendering:**")
             st.latex(latex)
-            
-            st.markdown("**📝 LaTeX Code:**")
-            st.code(latex, language="latex")
         else:
             st.warning("No LaTeX extracted")
         
