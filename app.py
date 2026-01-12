@@ -11,7 +11,6 @@ from contextlib import asynccontextmanager
 import tempfile
 
 # ----------------------------------------------------------------------------
-# WARNING SUPPRESSION
 # ----------------------------------------------------------------------------
 # Fix Albumentations update check warning (must be set before import)
 os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
