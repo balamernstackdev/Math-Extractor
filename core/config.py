@@ -157,6 +157,18 @@ class Settings:
     use_ast_pipeline: bool = os.getenv("USE_AST_PIPELINE", "false").lower() == "true"
     turbo_mode: bool = os.getenv("TURBO_MODE", "false").lower() == "true"
 
+    def __post_init__(self):
+        """Finalize settings, loading from secrets if needed."""
+        # Try loading OpenAI key from Streamlit secrets if not in env
+        if not self.openai_api_key:
+            try:
+                import streamlit as st
+                # Check safeguards to avoid error during build/import where st isn't fully loaded
+                if hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
+                    self.openai_api_key = st.secrets["OPENAI_API_KEY"]
+            except Exception:
+                # streamlit not installed or secrets not available
+                pass
 
 settings = Settings()
 
