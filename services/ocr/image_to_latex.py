@@ -1096,8 +1096,30 @@ class ImageToLatex:
     def _is_corrupted_ocr_output(self, text: str) -> bool:
         """Detect if OCR output is corrupted (has shredded patterns)."""
         if not text:
-            return False
-        
+            return True
+            
+        # 1. Suspicious short outputs with weird brackets
+        if len(text) < 15 and ("{" not in text and "}" not in text):
+            # "f [ x ]" matches but "x = y" is valid.
+            if any(c in text for c in "[]@#$"):
+                return True
+                
+        # 2. Known Tesseract failure artifacts
+        artifacts = ["hag", "Xil", "Yl]", "t€Z", "[e]", "|Xilé]", "€L"]
+        for art in artifacts:
+            if art in text:
+                return True
+                
+        # 3. Ratio of valid latex commands
+        if "\\" not in text and len(text) > 10:
+            # If length > 10 and NO backslashes, highly suspicious for math
+            return True
+            
+        # 4. Too many non-ascii or weird punctuation
+        bad_chars = sum(1 for c in text if c in "?!@#$|[]")
+        if bad_chars > len(text) * 0.3: # >30% garbage
+            return True
+            
         import re
         
         # Check for shredded command patterns like \e_{q}u_{i}v, \m_{a}t_{h}b_{f}

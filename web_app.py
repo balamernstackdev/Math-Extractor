@@ -132,6 +132,12 @@ if "manual_snip_result" not in st.session_state:
     st.session_state.manual_snip_result = None
 
 services = get_services()
+if hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
+    try:
+        services["latex_ocr"].set_api_key(st.secrets["OPENAI_API_KEY"])
+        # logger.info("Explicitly set OpenAI API key on latex_ocr service")
+    except Exception:
+        pass
 
 # ============================================================================
 # LEFT SIDEBAR - Upload & Formula List (like desktop)
