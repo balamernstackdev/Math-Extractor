@@ -42,7 +42,7 @@ class ASTToMathMLSerializer:
         if not ast or ast.node_type == "empty":
             return self._empty_mathml()
         
-        logger.info(f"[ASTToMathML] Serializing AST (type={ast.node_type})")
+        logger.debug(f"[ASTToMathML] Serializing AST (type={ast.node_type})")
         
         # Build MathML content
         content = self._serialize_node(ast)

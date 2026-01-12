@@ -41,6 +41,14 @@ from PIL import Image
 from streamlit_cropper import st_cropper
 
 from core.config import settings
+
+# Force load API key from secrets for Streamlit Cloud (Failsafe)
+try:
+    if hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
+        settings.openai_api_key = st.secrets["OPENAI_API_KEY"]
+except Exception:
+    pass
+
 from core.logger import init_logging, logger
 from services.ocr.formula_detector import FormulaDetector
 from services.ocr.image_to_latex import ImageToLatex
