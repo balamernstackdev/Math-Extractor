@@ -51,6 +51,12 @@ except Exception:
 
 from core.logger import init_logging, logger
 from services.ocr.formula_detector import FormulaDetector
+import importlib
+import sys
+# Force reload of the math engine to ensure latest changes (regex fixes) are applied
+if "services.ocr.math_engine" in sys.modules:
+    importlib.reload(sys.modules["services.ocr.math_engine"])
+    
 from services.ocr.math_engine import ImageToLatex
 from services.ocr.latex_to_mathml import LatexToMathML
 from services.pdf_loader.pdf_reader import PDFReader
@@ -64,7 +70,7 @@ ensure_directories()
 
 # Cached services
 @st.cache_resource
-def get_services_v5():
+def get_services_v6():
     return {
         "pdf_reader": PDFReader(),
         "pdf_renderer": PDFRenderer(),
@@ -131,7 +137,7 @@ if "extraction_complete" not in st.session_state:
 if "manual_snip_result" not in st.session_state:
     st.session_state.manual_snip_result = None
 
-services = get_services_v5()
+services = get_services_v6()
 if hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
     try:
         services["latex_ocr"].set_api_key(st.secrets["OPENAI_API_KEY"])
