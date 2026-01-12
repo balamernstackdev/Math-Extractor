@@ -376,8 +376,13 @@ class ImageToLatex:
                 if os.path.exists(cache_weights):
                     log_debug(f"Found cached weights at: {cache_weights}")
                     # Manually construct args to force loading from our cache
+                    # Resolution: Find absolute path to config
+                    import pix2tex
+                    base_path = os.path.dirname(pix2tex.__file__)
+                    abs_config = os.path.join(base_path, 'model', 'settings', 'config.yaml')
+                    
                     args = munch.Munch({
-                        'config': 'settings/config.yaml', 
+                        'config': abs_config, 
                         'checkpoint': cache_weights,
                         'no_cuda': True,
                         'no_resize': False
@@ -585,6 +590,9 @@ class ImageToLatex:
                 
                 return processed
             except Exception as exc:  # noqa: BLE001
+                import traceback
+                tb = traceback.format_exc()
+                log_debug(f"pix2tex inference CRASHED: {exc}\n{tb}")
                 logger.warning("pix2tex failed, falling back to Tesseract: %s", exc)
                 # Fall through to Tesseract
         
@@ -643,7 +651,7 @@ class ImageToLatex:
         if cleaned:
             cleaned = self._try_openai_ocr_cleanup(cleaned)
         
-        return cleaned if cleaned else r"\text{OCR failed}"
+        return (cleaned + r" \quad \text{[Tesseract]}") if cleaned else r"\text{OCR failed}"
     
     def _preprocess_image(self, image) -> any:  # noqa: ANN401
         """Preprocess image to improve OCR accuracy."""
