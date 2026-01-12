@@ -794,15 +794,17 @@ class ImageToLatex:
         text = re.sub(r'\n+', '\n', text)
         
         # FIX: Common substitutions where Model predicts wrong symbol
-        # 1. "\to" or "-" appearing before \sum, \int, \prod implies it should be "="
+        # 1. "Arrow" before \sum, \int, \prod implies it should be "="
         #    e.g. "Y \to \sum" -> "Y = \sum"
-        #    We match a preceding alphanum/bracket, optional space, the wrong symbol, optional space, and the operator
-        text = re.sub(r'([a-zA-Z0-9\]\)\}])\s*\\to\s*(\\sum|\\int|\\prod)', r'\1 = \2', text)
+        #    Global replace: any arrow followed by operator -> = operator
+        text = re.sub(r'\\(to|rightarrow|longrightarrow)\s*(\\sum|\\int|\\prod)', r'= \2', text)
         text = re.sub(r'([a-zA-Z0-9\]\)\}])\s*-\s*(\\sum|\\int|\\prod)', r'\1 = \2', text)
         
-        # 2. Fix the specific case of vertical bar being confused with equals or part of sum
-        #    (Sometimes "| \sum" happens)
+        # 2. Fix the specific case of vertical bar being confused with equals
+        #    Also fix "h" being read as "|" after sum: "\sum |_" -> "\sum h_"
+        #    (Matches \sum | followed by _ or {)
         text = re.sub(r'([a-zA-Z0-9\]\)\}])\s*\|\s*(\\sum|\\int|\\prod)', r'\1 = \2', text)
+        text = re.sub(r'(\\sum|\\int)\s*\|\s*([_{])', r'\1 h\2', text)
 
         return text.strip()
     
