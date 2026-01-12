@@ -18,6 +18,25 @@ os.environ["PIX2TEX_CACHE"] = os.path.join(_cache_dir, "pix2tex")
 os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+# -------------------------------------------------------------------------
+# LOAD SECRETS: Streamlit Cloud secrets OR .env file
+# This enables OpenAI Vision OCR fallback when pix2tex fails
+# -------------------------------------------------------------------------
+try:
+    import streamlit as st
+    # Load from Streamlit secrets (for Streamlit Cloud deployment)
+    if hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
+        os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+except Exception:
+    pass
+
+# Load from .env file (for local development)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 import io
 from pathlib import Path
 from typing import List, Dict, Any, Optional
