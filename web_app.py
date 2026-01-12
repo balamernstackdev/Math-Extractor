@@ -171,7 +171,13 @@ with st.sidebar:
             except ImportError:
                 st.error("❌ 'openai' library not installed.")
             except Exception as e:
-                st.error(f"❌ Connection Failed: {e}")
+                error_str = str(e)
+                if "401" in error_str or "incorrect api key" in error_str.lower():
+                    st.error("❌ **Authentication Failed (401)**")
+                    st.warning("Your API Key is invalid/expired. Please update `OPENAI_API_KEY` in Streamlit Secrets.")
+                    st.code(error_str, language="text")
+                else:
+                    st.error(f"❌ Connection Failed: {e}")
 
         if st.button("Reload Config"):
             st.rerun()
