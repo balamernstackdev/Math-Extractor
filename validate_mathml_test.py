@@ -10,11 +10,13 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from services.ocr.strict_pipeline import (
-    validate_mathml_strict,
-    validate_mathml_ast_rules,
+from services.ocr.pipeline_components.corruption import (
     is_corrupted_mathml,
     mathml_has_spelled_words
+)
+from services.ocr.pipeline_components.validation import (
+    validate_mathml_strict,
+    validate_mathml_ast_rules
 )
 
 def validate_mathml(mathml: str) -> None:

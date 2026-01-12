@@ -1,371 +1,349 @@
 # -*- mode: python ; coding: utf-8 -*-
+
 """
-PyInstaller spec file for Mathpix Clone application.
+PyInstaller spec for Mathpix Clone
+STABLE CONFIGURATION
 
-This file provides more control over the build process than command-line arguments.
-You can customize it to include additional files, exclude modules, etc.
-
-Usage:
-    pyinstaller MathpixClone.spec
+Verified for:
+- Python 3.11.x
+- PyInstaller 6.x
+- PyQt6 6.7.x + QtWebEngine
+- pix2tex / torch (CPU)
 """
 
-import sys
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files, collect_all, collect_dynamic_libs
+import sys
 import os
+from unittest.mock import MagicMock
 
-# PyInstaller hooks for collecting data files
-from PyInstaller.utils.hooks import collect_data_files, collect_all
+# FIX: Mock optional dependencies to prevent "No module named" errors 
+# during submodule collection
+import types
 
-# Get project root - PyInstaller should be run from project root
-# Use current working directory (where pyinstaller command is run from)
-spec_root = Path.cwd()
+# Create simple module mocks
+mamba_ssm_mock = types.ModuleType("mamba_ssm")
+numba_mock = types.ModuleType("numba")
 
-# Verify we're in the right place - look for app.py
-if not (spec_root / 'app.py').exists():
-    # Try to find project root by looking for app.py in parent directories
-    for parent in spec_root.parents:
-        if (parent / 'app.py').exists():
-            spec_root = parent
-            break
-
-# Print for debugging (will show in PyInstaller output)
-print(f"[SPEC] Project root: {spec_root}")
-print(f"[SPEC] Data exists: {(spec_root / 'data').exists()}")
-print(f"[SPEC] App.py exists: {(spec_root / 'app.py').exists()}")
-
-# Check for icon file
-icon_path = spec_root / 'icon.ico'
-if icon_path.exists():
-    print(f"[SPEC] ✅ Icon found: {icon_path}")
-else:
-    print(f"[SPEC] ⚠️  Icon not found: {icon_path}")
-    print(f"[SPEC]    To add an icon: Create icon.ico in project root or use create_icon.py")
-
-# Collect pix2tex data files (models, configs, etc.)
-pix2tex_datas = []
-pix2tex_binaries = []
-pix2tex_hiddenimports = []
-
-try:
-    pix2tex_info = collect_all('pix2tex')
-    pix2tex_datas = pix2tex_info[0]  # Data files
-    pix2tex_binaries = pix2tex_info[1]  # Binaries
-    pix2tex_hiddenimports = pix2tex_info[2]  # Hidden imports
-    print(f"[SPEC] Collected {len(pix2tex_datas)} pix2tex data files")
-except Exception as e:
-    print(f"[SPEC] Warning: Could not collect pix2tex data files: {e}")
-
-# Collect QtWebEngine resources (CRITICAL for PreviewPanel)
-qtwebengine_datas = []
-qtwebengine_binaries = []
-qtwebengine_hiddenimports = []
-qtwebengine_datas = []
-try:
-    from PyInstaller.utils.hooks import collect_submodules, collect_data_files, collect_dynamic_libs, get_pyqt_qt_binaries
-    # Collect QtWebEngine data files (translations, resources, etc.)
-    qtwebengine_datas = collect_data_files('PyQt6.QtWebEngine', includes=['**/*'])
-    # Also collect QtWebEngineCore resources
-    qtwebengine_datas.extend(collect_data_files('PyQt6.QtWebEngineCore', includes=['**/*']))
-    # Collect QtWebEngine binaries (DLLs)
-    qtwebengine_binaries = collect_dynamic_libs('PyQt6.QtWebEngine')
-    qtwebengine_binaries.extend(collect_dynamic_libs('PyQt6.QtWebEngineCore'))
-    # CRITICAL: Collect ALL Qt DLLs (WebEngine depends on QtCore, QtGui, QtNetwork, QtQuick, etc.)
-    qt_all_binaries = get_pyqt_qt_binaries('PyQt6')
-    qtwebengine_binaries.extend(qt_all_binaries)
-    # Collect QtWebEngine submodules
-    qtwebengine_hiddenimports = collect_submodules('PyQt6.QtWebEngine')
-    qtwebengine_hiddenimports.extend(collect_submodules('PyQt6.QtWebEngineCore'))
-    print(f"[SPEC] Collected {len(qtwebengine_datas)} QtWebEngine resource files")
-    print(f"[SPEC] Collected {len(qtwebengine_binaries)} Qt binaries (including WebEngine)")
-    print(f"[SPEC] Collected {len(qtwebengine_hiddenimports)} QtWebEngine submodules")
-except Exception as e:
-    print(f"[SPEC] Warning: Could not collect QtWebEngine resources: {e}")
-    # Try alternative method
-    try:
-        import PyQt6.QtWebEngine
-        import PyQt6.QtWebEngineCore
-        qtwebengine_path = Path(PyQt6.QtWebEngine.__file__).parent
-        qtwebengine_core_path = Path(PyQt6.QtWebEngineCore.__file__).parent
-        print(f"[SPEC] QtWebEngine path: {qtwebengine_path}")
-        print(f"[SPEC] QtWebEngineCore path: {qtwebengine_core_path}")
-        # Manually add common QtWebEngine submodules
-        qtwebengine_hiddenimports = [
-            'PyQt6.QtWebEngine',
-            'PyQt6.QtWebEngineCore',
-            'PyQt6.QtWebEngineWidgets',
-            'PyQt6.QtWebEngineCore.QWebEngineUrlRequestInterceptor',
-            'PyQt6.QtWebEngineCore.QWebEngineUrlSchemeHandler',
-        ]
-    except Exception as e2:
-        print(f"[SPEC] Warning: Could not locate QtWebEngine paths: {e2}")
-        # qtwebengine_hiddenimports already initialized as empty list above
-
-# Also try to include pix2tex cache if it exists (models downloaded by user)
-pix2tex_cache = Path(os.path.expanduser('~/.cache/pix2tex'))
-if pix2tex_cache.exists():
-    print(f"[SPEC] Found pix2tex cache at: {pix2tex_cache}")
-    # Include cache directory
-    for item in pix2tex_cache.rglob('*'):
-        if item.is_file():
-            rel_path = item.relative_to(pix2tex_cache.parent.parent)
-            pix2tex_datas.append((str(item), str(rel_path.parent)))
-            print(f"[SPEC] Including pix2tex cache file: {item.name}")
+sys.modules["mamba_ssm"] = mamba_ssm_mock
+sys.modules["numba"] = numba_mock
 
 block_cipher = None
 
+# =====================================================
+# PROJECT ROOT
+# =====================================================
+spec_root = Path.cwd()
+
+# =====================================================
+# GLOBAL COLLECTORS (MUST BE DEFINED FIRST)
+# =====================================================
+datas = []
+binaries = []
+hiddenimports = []
+
+# FIX: Explicitly bundle icon for runtime use
+if (spec_root / "icon.ico").exists():
+    datas.append(("icon.ico", "."))
+
+# =====================================================
+# POPPLER (PDF → IMAGE)
+# =====================================================
+poppler_dir = spec_root / "poppler" / "bin"
+if poppler_dir.exists():
+    datas.append((str(poppler_dir), "poppler/bin"))
+
+# =====================================================
+# MATHJAX (OFFLINE PREVIEW)
+# =====================================================
+mathjax_dir = spec_root / "mathjax"
+if mathjax_dir.exists():
+    datas.append((str(mathjax_dir), "mathjax"))
+
+# =====================================================
+# PIX2TEX DATA (MODELS / CONFIG)
+# =====================================================
+try:
+    datas += collect_data_files("pix2tex", includes=["**/*"])
+except Exception:
+    pass
+
+# Explicitly bundle valid model files we found
+if (spec_root / "pix2tex_model").exists():
+    datas.append(("pix2tex_model", "pix2tex_model"))
+
+# =====================================================
+# PANDAS (Required by pix2tex)
+# =====================================================
+# NOTE: Pandas collection is now handled by hooks/hook-pandas.py  
+# to avoid numba warnings during submodule collection
+# try:
+#     # Use granular collection to avoid recursive 'collect_all' warnings (e.g. numba)
+#     # Collect submodules (Python code), data files, and binaries separately
+#     pandas_submodules = collect_submodules('pandas')
+#     # Filter out numba-dependent submodules
+#     pandas_submodules = [m for m in pandas_submodules if '_numba' not in m]
+#     hiddenimports += pandas_submodules
+#     datas += collect_data_files('pandas', include_py_files=False)
+#     binaries += collect_dynamic_libs('pandas')
+# except Exception:
+#     pass
+
+
+# =====================================================
+# QT / WEBENGINE (CRITICAL)
+# =====================================================
+hiddenimports += [
+    "PyQt6.QtCore",
+    "PyQt6.QtGui",
+    "PyQt6.QtWidgets",
+    "PyQt6.QtNetwork",
+    "PyQt6.QtPrintSupport",
+    "PyQt6.QtWebChannel",
+    "PyQt6.QtQuick",
+    "PyQt6.QtQuickWidgets",
+    "PyQt6.QtWebEngine",
+    "PyQt6.QtWebEngineCore",
+    "PyQt6.QtWebEngineWidgets",
+    
+    
+    # Force include UI modules
+    "ui",
+]
+
+# Aggressively collect all UI submodules
+hiddenimports += collect_submodules("ui")
+
+hiddenimports += collect_submodules("PyQt6.QtWebEngineCore")
+hiddenimports += collect_submodules("PyQt6.QtWebEngineWidgets")
+hiddenimports += collect_submodules("timm")
+# Filter out kernels to avoid warnings about optional dependencies
+transformers_mods = collect_submodules("transformers")
+hiddenimports += [m for m in transformers_mods if "kernels" not in m]
+hiddenimports += collect_submodules("x_transformers")
+hiddenimports += collect_submodules("albumentations")
+hiddenimports += collect_submodules("services.ocr.pipeline_components")
+
+# =====================================================
+# OCR / ML / MATH
+# =====================================================
+hiddenimports += [
+    "pix2tex",
+    "pix2tex.model",
+    "pix2tex.utils",
+    "pix2tex.model",
+    "pix2tex.utils",
+    # CRITICAL: Dynamic imports for MathML conversion pipeline
+    "services.ocr.latex_parser",
+    "services.ocr.ast_to_mathml",
+    "services.ocr.pipeline_components",
+    # CRITICAL: Tokenizers library for force-reload fix
+    "tokenizers",
+    "tokenizers.implementations",
+    "tokenizers.models",
+    "tokenizers.decoders",
+    "tokenizers.normalizers",
+    "tokenizers.pre_tokenizers",
+    "tokenizers.processors",
+    "latex2mathml",
+    "latex2mathml.converter",
+    "latex2mathml.commands",
+    "latex2mathml.exceptions",
+    "pytesseract",
+    "fitz",
+    "pymupdf",
+    # CRITICAL: Missing dependencies for pix2tex
+    "tokenizers",
+    "transformers",
+    "huggingface_hub",
+    "yaml",
+    "packaging",
+    # MISSING DEPS THAT CAUSE RUNTIME CRASHES or GARBAGE OUTPUT
+    "x_transformers",  # CRITICAL for pix2tex model architecture
+    "albumentations",  # CRITICAL for image preprocessing
+    "albumentations.augmentations",
+    "albumentations.augmentations.geometric",
+    "albumentations.augmentations.transforms",
+    "timm", 
+    "einops",
+    "pandas",  # Required by pix2tex
+    "pandas._libs",
+    "pandas._libs.pandas_parser",
+    "pandas._libs.tslib",
+    "pandas._libs.skiplist",
+    "pandas._libs.arrays",
+    "pandas._libs.interval",
+    "pandas._libs.hashing",
+    "chardet",
+    "charset_normalizer",
+    # FIX: Explicitly include opencv
+    "cv2", 
+    "dotenv",
+
+    # FIX: Explicitly include Qt modules
+    "PyQt6.QtCore",
+    "PyQt6.QtGui",
+    "PyQt6.QtWidgets",
+    "PyQt6.QtWebEngineWidgets",
+    "PyQt6.QtWebEngineCore",
+    # CRITICAL FIX FOR MATHML CRASH
+    "lxml",
+    "lxml.etree",
+    "lxml._elementpath",
+    "defusedxml",
+    "torchvision",
+    "pytz",
+    "dateutil",
+    "PIL",
+    "PIL.Image",
+    "PIL.ImageOps",
+]
+
+# CRITICAL: Copy metadata for version checks (transformers checks tokenizers version)
+from PyInstaller.utils.hooks import copy_metadata
+datas += copy_metadata('tokenizers')
+datas += copy_metadata('transformers')
+datas += copy_metadata('timm')
+datas += copy_metadata('packaging')
+
+# =====================================================
+# EXCLUDES (SPEED + SIZE OPTIMIZATION)
+# =====================================================
+excludes = [
+    # Test / dev
+    "expecttest",
+    "pytest",
+    "IPython",
+    "jupyter",
+    "tkinter",
+
+    # Vision (huge)
+    # NOTE: pix2tex might need torchvision. 
+    # Enable torchvision since we need it for pix2tex transforms
+    # "torchvision",
+
+    # Project garbage
+    "tests",
+    "docs",
+    "examples",
+
+    # Web frameworks (not needed for desktop app)
+    "streamlit",
+    "fastapi",
+    "uvicorn",
+    "starlette",
+    "tornado",
+    "fsspec",
+    "s3fs",
+
+    # Data Science / Plotting (heavy, likely unused by core OCR)
+    "matplotlib",
+    "seaborn",
+    "bokeh",
+    "plotly",
+    "pydeck",
+    "altair",
+    # Unused heavy libraries
+    # "pandas",
+    
+    # Dev / Misc
+    "lib2to3",
+    "pkg_resources",  # careful, but often huge
+    
+    # Fix runtime extraction error
+    "bidi",
+    "algorithm",
+    
+    # NLTK is unused and causes issues
+    "nltk",
+
+    # Heavy Vision/ML transient deps
+    "paddle",
+    "paddlepaddle",
+    "paddlex",
+    "pyarrow",
+    "datasets",
+    
+    # Unused PyQt6 modules (save ~200MB)
+    "PyQt6.QtQuick",
+    "PyQt6.QtQml",
+    "PyQt6.QtSql",
+    "PyQt6.QtSvg",
+    "PyQt6.QtXml",
+    "PyQt6.QtMultimedia",
+    "PyQt6.QtBluetooth",
+    "PyQt6.QtNfc",
+    "PyQt6.QtPositioning",
+    "PyQt6.QtRemoteObjects",
+    "PyQt6.QtSensors",
+    "PyQt6.QtSerialPort",
+    "PyQt6.QtTest",
+    
+    # Optional deps causing warnings
+    "numba",  # Optional performance optimization - removed pandas.core._numba to let hook collect it
+    "transformers.kernels.falcon_mamba",
+    "transformers.kernels",  # Excludes all kernel implementations (falcon_mamba, etc.)
+    "mamba_ssm",
+]
+
+
+# =====================================================
+# ANALYSIS
+# =====================================================
 a = Analysis(
-    ['app.py'],  # Main entry point
+    ["app.py"],
     pathex=[str(spec_root)],
-    binaries=pix2tex_binaries + qtwebengine_binaries,  # Include pix2tex and QtWebEngine binaries
-    datas=[
-        # Use absolute paths - PyInstaller will copy these to the executable
-        # Only include if they exist (data might be created at runtime)
-        *([(str(spec_root / 'data'), 'data')] if (spec_root / 'data').exists() else []),
-        *([(str(spec_root / 'utils' / 'entity_reference.json'), 'utils')] if (spec_root / 'utils' / 'entity_reference.json').exists() else []),
-        # Optional offline MathJax bundle
-        *([(str(spec_root / 'mathjax'), 'mathjax')] if (spec_root / 'mathjax').exists() else []),
-        # Include pix2tex data files (models, configs)
-        *pix2tex_datas,
-        # Include QtWebEngine resources (CRITICAL for PreviewPanel)
-        # Note: qtwebengine_datas already includes translations and resources via collect_data_files
-        *qtwebengine_datas,
-    ],
-    hiddenimports=[
-        # PyQt6 modules (CRITICAL: Include WebEngine for PreviewPanel)
-        'PyQt6.QtCore',
-        'PyQt6.QtGui',
-        'PyQt6.QtWidgets',
-        'PyQt6.QtWebEngineWidgets',  # REQUIRED for PreviewPanel MathML rendering
-        'PyQt6.QtWebEngineCore',  # REQUIRED for WebEngine
-        'PyQt6.QtWebEngine',  # REQUIRED for WebEngine resources
-        # CRITICAL: WebEngine dependencies (required by WebEngine)
-        'PyQt6.QtNetwork',  # REQUIRED by WebEngine
-        'PyQt6.QtQuick',  # REQUIRED by WebEngineCore
-        'PyQt6.QtQuickWidgets',  # REQUIRED by WebEngineWidgets
-        # Include all QtWebEngine submodules (collected above)
-        *qtwebengine_hiddenimports,
-        
-        # FastAPI and web (only if using API mode)
-        'fastapi',
-        'uvicorn',
-        'uvicorn.lifespan',
-        'uvicorn.lifespan.on',
-        'uvicorn.protocols',
-        'uvicorn.protocols.http',
-        'uvicorn.protocols.websockets',
-        'uvicorn.loops',
-        'uvicorn.loops.auto',
-        'uvicorn.loops.asyncio',
-        
-        # OCR and ML
-        'pix2tex',
-        'pix2tex.cli',
-        'pix2tex.model',
-        'pix2tex.utils',
-        'pix2text',
-        'latex2mathml',  # LaTeX to MathML converter
-        'latex2mathml.converter',  # Main converter module
-        'latex2mathml.parser',  # Parser module
-        'latex2mathml.symbols',  # Symbol definitions
-        'latex2mathml.commands',  # Command definitions
-        'latex2mathml.exceptions',  # Exception classes
-        'latex2mathml.symbols_parser',  # Symbol parser
-        'latex2mathml.tokenizer',  # Tokenizer
-        'latex2mathml.walker',  # AST walker
-        'pytesseract',
-        # Include pix2tex hidden imports
-        *pix2tex_hiddenimports,
-        
-        # MathML recovery modules (CRITICAL: Dynamic imports)
-        'services.ocr.mathml_recovery_pro',
-        'services.ocr.mathml_recovery',
-        'services.ocr.mathml_recovery_pro_force',
-        'services.ocr.dynamic_latex_reconstructor',
-        'services.ocr.latex_to_mathml',
-        'services.ocr.strict_pipeline',
-        'services.ocr.openai_mathml_converter',
-        'services.ocr.pipeline',
-        'services.ocr.math_expression_pipeline',
-        'services.ocr.image_to_latex',  # OCR service
-        'services.ocr.ocr_mathml_cleaner',  # MathML cleaner
-        'services.ocr.pix2tex_auto_fixer',  # Auto fixer
-        
-        # XML/HTML parsing (REQUIRED for latex2mathml and MathML processing)
-        'xml.etree.ElementTree',
-        'xml.etree.cElementTree',  # C implementation if available
-        'html',
-        'html.parser',
-        'html.entities',
-        
-        # Image processing
-        'PIL',
-        'PIL.Image',
-        'PIL.ImageTk',  # Some image operations
-        'cv2',
-        'numpy',
-        
-        # ML frameworks (minimal - only what pix2tex needs)
-        'torch',
-        'torch.nn',
-        'torch.nn.functional',
-        'transformers',
-        
-        # OpenAI (optional)
-        'openai',
-        'httpx',  # Required by openai client
-        
-        # Other dependencies
-        'pydantic',
-        'pymupdf',  # PyMuPDF
-        'fitz',  # PyMuPDF alias
-    ],
-    hookspath=([str(spec_root / 'hooks')] if (spec_root / 'hooks').exists() else []),  # Include custom hooks if directory exists
-    hooksconfig={},
-    runtime_hooks=([str(spec_root / 'hooks' / 'pyi_rth_pyqt6.py')] if (spec_root / 'hooks' / 'pyi_rth_pyqt6.py').exists() else []),
-    excludes=[
-        # Testing and development
-        'matplotlib.tests',
-        'matplotlib.testing',
-        'numpy.tests',
-        'scipy',
-        'pytest',
-        'pytest_*',
-        'IPython',
-        'jupyter',
-        'notebook',
-        'tkinter',
-        'unittest',
-        'doctest',
-        
-        # PyTorch unnecessary components (BIG SIZE SAVINGS)
-        'torch.distributed',  # Distributed training - not needed
-        'torch.multiprocessing',  # Multiprocessing - not needed
-        'torch.onnx',  # ONNX export - not needed
-        'torch.jit',  # JIT compilation - not needed
-        'torch.autograd.profiler',  # Profiling - not needed
-        'torch.backends.cudnn',  # CUDA - not needed for CPU
-        'torch.backends.mkl',  # MKL - optional
-        'torch.backends.mkldnn',  # MKLDNN - optional
-        'torch.backends.openmp',  # OpenMP - optional
-        'torch.backends.quantized',  # Quantization - not needed
-        'torch.cuda',  # CUDA support - not needed for CPU
-        'torch.testing',  # Testing - not needed
-        'torch.utils.bottleneck',  # Profiling - not needed
-        'torch.utils.tensorboard',  # TensorBoard - not needed
-        'torch._dynamo',  # Dynamic compilation - not needed
-        'torch._inductor',  # Inductor - not needed
-        'torch._lazy',  # Lazy tensors - not needed
-        'torch._numpy',  # NumPy compatibility - not needed
-        'torch.ao',  # AO quantization - not needed
-        
-        # torchvision (NOT NEEDED for pix2tex - BIG SIZE SAVINGS ~100-200MB)
-        'torchvision',
-        'torchvision.*',
-        
-        # Transformers unnecessary components (be conservative - pix2tex might need some)
-        'transformers.trainer',  # Training - not needed
-        'transformers.training_args',  # Training - not needed
-        'transformers.integrations.*',  # Integrations - not needed
-        'transformers.commands.*',  # CLI commands - not needed
-        'transformers.onnx.*',  # ONNX export - not needed
-        'transformers.quantizers.*',  # Quantization - not needed
-        'transformers.models.deprecated.*',  # Deprecated models
-        'transformers.models.megatron.*',  # Megatron - not needed
-        'transformers.models.granite.*',  # Granite - not needed
-        'transformers.models.musicgen.*',  # MusicGen - not needed
-        'transformers.models.wav2vec2.*',  # Audio models - not needed
-        'transformers.models.mgp_str.*',  # MGP - not needed
-        'transformers.models.realm.*',  # REALM - not needed
-        
-        # PyQt6 unnecessary modules (KEEP WebEngine and its dependencies - they're REQUIRED!)
-        'PyQt6.QtOpenGL',
-        'PyQt6.QtPrintSupport',
-        # DO NOT EXCLUDE QtWebEngine or its dependencies - PreviewPanel needs them!
-        # 'PyQt6.QtWebEngine',  # REQUIRED - DO NOT EXCLUDE
-        # 'PyQt6.QtWebEngineWidgets',  # REQUIRED - DO NOT EXCLUDE
-        # 'PyQt6.QtNetwork',  # REQUIRED by WebEngine - DO NOT EXCLUDE
-        # 'PyQt6.QtQuick',  # REQUIRED by WebEngineCore - DO NOT EXCLUDE
-        # 'PyQt6.QtQuickWidgets',  # REQUIRED by WebEngineWidgets - DO NOT EXCLUDE
-        'PyQt6.QtWebSockets',
-        'PyQt6.QtBluetooth',
-        'PyQt6.QtNfc',
-        'PyQt6.QtPositioning',
-        'PyQt6.QtLocation',
-        'PyQt6.QtSensors',
-        'PyQt6.QtSerialPort',
-        'PyQt6.QtSql',
-        'PyQt6.QtSvg',
-        'PyQt6.QtTest',
-        'PyQt6.QtXml',
-        'PyQt6.QtXmlPatterns',
-        'PyQt6.QtDesigner',
-        'PyQt6.QtHelp',
-        'PyQt6.QtMultimedia',
-        'PyQt6.QtMultimediaWidgets',
-        'PyQt6.QtQml',
-        'PyQt6.QtRemoteObjects',
-        'PyQt6.QtScxml',
-        'PyQt6.QtStateMachine',
-        'PyQt6.QtTextToSpeech',
-        'PyQt6.QtCharts',
-        'PyQt6.QtDataVisualization',
-        'PyQt6.Qt3DCore',
-        'PyQt6.Qt3DRender',
-        'PyQt6.Qt3DInput',
-        'PyQt6.Qt3DLogic',
-        'PyQt6.Qt3DAnimation',
-        'PyQt6.Qt3DExtras',
-        
-        # Matplotlib unnecessary backends (keep only what's needed)
-        'matplotlib.backends.backend_pdf',
-        'matplotlib.backends.backend_ps',
-        'matplotlib.backends.backend_svg',
-        'matplotlib.backends.backend_template',
-        'matplotlib.backends.backend_tkagg',
-        'matplotlib.backends.backend_webagg',
-        'matplotlib.backends.backend_wx',
-        'matplotlib.backends.backend_wxagg',
-        'matplotlib.backends.backend_gtk3agg',
-        'matplotlib.backends.backend_gtk3cairo',
-        'matplotlib.backends.backend_gtk4agg',
-        'matplotlib.backends.backend_gtk4cairo',
-        'matplotlib.backends.backend_qt5agg',
-        'matplotlib.backends.backend_qt4agg',
-        'matplotlib.backends.backend_cairo',
-        'matplotlib.backends.backend_macosx',
-        'matplotlib.backends.backend_nbagg',
-        'matplotlib.backends.backend_pgf',
-        'matplotlib.backends.backend_qt',
-        'matplotlib.backends.qt_compat',
-    ],
-    noarchive=False,
-    optimize=0,
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[str(spec_root / "hooks")] if (spec_root / "hooks").exists() else [],
+    runtime_hooks=[],
+    excludes=excludes,
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
 )
 
-pyz = PYZ(a.pure)
+# =====================================================
+# PYZ
+# =====================================================
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+# =====================================================
+# EXE
+# =====================================================
+# Icon selection
+icon_path = spec_root / "icon.ico"
+if icon_path.exists():
+    selected_icon = str(icon_path)
+else:
+    selected_icon = None
 
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
-    name='MathpixClone',
+    exclude_binaries=True,
+    name="Math Extractor",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,  # Use UPX compression (if available)
-    upx_exclude=[
-        'vcruntime140.dll',  # Don't compress Windows runtime DLLs
-        'python*.dll',  # Don't compress Python DLLs
-    ],
-    runtime_tmpdir=None,
-    console=False,  # No console window (GUI app)
+    upx=False,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(spec_root / 'icon.ico') if (spec_root / 'icon.ico').exists() else None,  # Mathpix-style icon
+    icon=selected_icon,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='Math Extractor',
 )

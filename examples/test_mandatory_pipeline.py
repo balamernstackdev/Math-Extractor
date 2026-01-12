@@ -7,12 +7,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from services.ocr.strict_pipeline import (
-    StrictMathpixPipeline,
-    detect_latex_corruption,
-    validate_mathml_strict,
-    is_corrupted_mathml
-)
+from services.ocr.strict_pipeline import StrictMathpixPipeline
+from services.ocr.pipeline_components.corruption import detect_latex_corruption, is_corrupted_mathml
+from services.ocr.pipeline_components.validation import validate_mathml_strict
 
 def test_mandatory_pipeline():
     """Test the mandatory pipeline."""

@@ -1,0 +1,13 @@
+# Testing Dependencies
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-xdist>=3.3.1  # Parallel test execution
+pytest-timeout>=2.1.0  # Timeout for slow tests
+
+# Code Quality
+black>=23.7.0
+flake8>=6.1.0
+mypy>=1.5.0
+
+# Coverage Reporting
+coverage[toml]>=7.3.0

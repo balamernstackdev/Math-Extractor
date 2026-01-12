@@ -7,9 +7,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from services.ocr.strict_pipeline import (
-    StrictMathpixPipeline,
-    pre_openai_regex_corruption_checker,
+from services.ocr.strict_pipeline import StrictMathpixPipeline
+from services.ocr.pipeline_components.corruption import pre_openai_regex_corruption_checker
+from services.ocr.pipeline_components.validation import (
     validate_mathml_ast_rules,
     validate_latex_ast_rules
 )

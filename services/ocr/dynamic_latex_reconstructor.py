@@ -30,6 +30,7 @@ class DynamicLaTeXReconstructor:
         latex = self._normalize_unicode(latex)
         latex = self._remove_ocr_noise(latex)
         latex = self._fix_script_noise(latex)
+        latex = self._strip_ai_artifacts(latex)
         latex = self._fix_braces(latex)
 
         latex = latex.strip()
@@ -43,6 +44,26 @@ class DynamicLaTeXReconstructor:
     # ----------------------------------------------------------------------
     # Helpers
     # ----------------------------------------------------------------------
+
+    def _strip_ai_artifacts(self, s: str) -> str:
+        """Remove common AI chatter and OCR headers."""
+        if not s:
+            return s
+            
+        # Common AI patterns found in OCR or LLM reparsing
+        artifacts = [
+            r"(?i)^Equation\s*Listing:?",
+            r"(?i)^Raw\s*Text:?",
+            r"(?i)^LaTeX:?",
+            r"(?i)^Cleaned\s*LaTeX:?",
+            r"(?i)^Here\s*is\s*the\s*equation:?",
+            r"(?i)^The\s*equation\s*is:?"
+        ]
+        
+        for art in artifacts:
+            s = re.sub(art, "", s).strip()
+            
+        return s
 
     def _normalize_unicode(self, text: str) -> str:
         """Normalize unicode + remove diacritical marks."""
@@ -85,20 +106,48 @@ class DynamicLaTeXReconstructor:
         return s
 
     def _fix_braces(self, s: str) -> str:
-        """Fix mismatched braces only (never insert new structure!)."""
+        """Fix mismatched delimiters and environments (structural repair)."""
+        if not s:
+            return s
+            
+        # Use a more robust approach for delimiters and environments
+        
+        # 1. Balanced braces {}
         opens = s.count("{")
         closes = s.count("}")
-
         if opens > closes:
             s += "}" * (opens - closes)
-
-        if closes > opens:
-            # Remove extra closing braces from the end
+        elif closes > opens:
+            # Only remove if it's trailing noise
             diff = closes - opens
             while diff > 0 and s.endswith("}"):
                 s = s[:-1]
                 diff -= 1
 
+        # 2. Balanced \left / \right
+        lefts = s.count(r"\left")
+        rights = s.count(r"\right")
+        if lefts > rights:
+            # Try to infer correct closing delimiter
+            missing = lefts - rights
+            # Check last \left type
+            last_left = re.findall(r'\\left\s*([\{\(\[\|.])', s)
+            if last_left:
+                delim_map = {'{': r'\right}', '(': r'\right)', '[': r'\right]', '|': r'\right|', '.': r'\right.'}
+                s += delim_map.get(last_left[-1], r"\right}") * missing
+            else:
+                s += r"\right}" * missing
+        
+        # 3. Mismatched environments \begin{...} \end{...}
+        begins = re.findall(r'\\begin\{([^}]+)\}', s)
+        ends = re.findall(r'\\end\{([^}]+)\}', s)
+        
+        if len(begins) > len(ends):
+            # Close the most recent unclosed environment
+            unclosed = begins[len(ends):]
+            for env in reversed(unclosed):
+                s += f" \\end{{{env}}}"
+                
         return s
 
 # """Dynamic LaTeX reconstruction from corrupted OCR output using general patterns.

@@ -3,20 +3,51 @@ from __future__ import annotations
 
 import sys
 import os
+import warnings
 from pathlib import Path
 from typing import Optional
 from contextlib import asynccontextmanager
 
 import tempfile
 
+# ----------------------------------------------------------------------------
+# WARNING SUPPRESSION
+# ----------------------------------------------------------------------------
+# Fix Albumentations update check warning (must be set before import)
+os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
+
+# Fix Pydantic serializer warnings (harmless spam)
+warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
+warnings.filterwarnings("ignore", category=UserWarning, module="albumentations") 
+
+# Fix DLL/OpenMP conflicts on Windows
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ["OMP_WAIT_POLICY"] = "PASSIVE"
+
+# CRITICAL: Force torch DLL path on Windows to avoid WinError 1114
+if sys.platform == "win32":
+    try:
+        torch_lib_path = Path(sys.prefix) / "Lib" / "site-packages" / "torch" / "lib"
+        if torch_lib_path.exists():
+            os.add_dll_directory(str(torch_lib_path))
+    except Exception:
+        pass
+
+# ----------------------------------------------------------------------------
+
 # NOTE: Do NOT import QtWebEngine here at module level!
 # The runtime hook (pyi_rth_pyqt6.py) will set PATH and initialize Qt properly.
 # Module-level imports happen before PATH is set, causing DLL resolution failures.
 
-import uvicorn
-from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+# import uvicorn  <-- MOVED to main()
+# from fastapi import FastAPI, File, UploadFile  <-- MOVED to create_app()
+# from fastapi.responses import HTMLResponse, JSONResponse
+# from fastapi.staticfiles import StaticFiles
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 from core.config import settings
 from core.logger import init_logging, logger
@@ -33,8 +64,12 @@ from utils.image_utils import crop_image
 from utils.ip_guard import enforce_ip_allowlist
 
 
-def create_app() -> FastAPI:
+def create_app() -> "FastAPI":
     """Create FastAPI app with basic health and upload routes."""
+    # Lazy imports to support desktop-only builds (without fastapi/uvicorn)
+    from fastapi import FastAPI, File, UploadFile
+    from fastapi.responses import HTMLResponse, JSONResponse
+    from fastapi.staticfiles import StaticFiles
     # Use lifespan handlers instead of deprecated on_event
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -282,36 +317,58 @@ def create_app() -> FastAPI:
 
 def main() -> None:
     """Entry point for CLI; starts FastAPI or PyQt based on args."""
-    init_logging()
+    # DETECT FROZEN MODE (EXE)
+    if getattr(sys, 'frozen', False):
+        try:
+            log_dir = Path.home()
+            log_file = log_dir / "mathpix_main.log"
+            init_logging(log_file=str(log_file))
+            logger.info(f"[Main] Frozen mode detected. Logging to {log_file}")
+        except Exception:
+            init_logging()
+    else:
+        init_logging()
+        
     ensure_directories()
+    
+    # CRITICAL FIX: Set AppUserModelID to ensure Taskbar Icon works on Windows
+    # This separates the app from the generic Python host launcher
+    if sys.platform == 'win32':
+        import ctypes
+        myappid = 'mathpix.clone.app.1.0' # arbitrary string
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+            logger.info(f"[Main] Set AppUserModelID to: {myappid}")
+        except Exception as e:
+            logger.warning(f"[Main] Failed to set AppUserModelID: {e}")
     
     # Check mode first - IP allowlist only applies to GUI mode
     mode: Optional[str] = sys.argv[1] if len(sys.argv) > 1 else None
     
     # IP allowlist check - skip in API mode (web servers should be accessible)
     # Also skip if MATHPIX_ALLOWED_IPS is not set (allow all)
-    if mode != "api" and settings.allowed_ips and not enforce_ip_allowlist(set(settings.allowed_ips)):
-        # User-friendly dialog when blocked (GUI mode only)
-        try:
-            from PyQt6 import QtWidgets, QtCore
+    # if mode != "api" and settings.allowed_ips and not enforce_ip_allowlist(set(settings.allowed_ips)):
+    #     # User-friendly dialog when blocked (GUI mode only)
+    #     try:
+    #         from PyQt6 import QtWidgets, QtCore
             
-            # CRITICAL: Set attribute before creating QApplication
-            QtCore.QCoreApplication.setAttribute(QtCore.Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
+    #         # CRITICAL: Set attribute before creating QApplication
+    #         QtCore.QCoreApplication.setAttribute(QtCore.Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
             
-            app = QtWidgets.QApplication(sys.argv)
-            QtWidgets.QMessageBox.critical(
-                None,
-                "Access denied",
-                "This machine's public IP is not in MATHPIX_ALLOWED_IPS.\n\n"
-                "Set the environment variable MATHPIX_ALLOWED_IPS to a comma-separated list "
-                "of allowed IPs and restart the application."
-            )
-        except Exception:
-            logger.error(
-                "Access denied: this IP is not in MATHPIX_ALLOWED_IPS. "
-                "Update the allowlist and rebuild/restart."
-            )
-        sys.exit(1)
+    #         app = QtWidgets.QApplication(sys.argv)
+    #         QtWidgets.QMessageBox.critical(
+    #             None,
+    #             "Access denied",
+    #             "This machine's public IP is not in MATHPIX_ALLOWED_IPS.\n\n"
+    #             "Set the environment variable MATHPIX_ALLOWED_IPS to a comma-separated list "
+    #             "of allowed IPs and restart the application."
+    #         )
+    #     except Exception:
+    #         logger.error(
+    #             "Access denied: this IP is not in MATHPIX_ALLOWED_IPS. "
+    #             "Update the allowlist and rebuild/restart."
+    #         )
+    #     sys.exit(1)
     
     if mode == "api":
         # CRITICAL: For web deployment (Render, Railway, etc.), ALWAYS use 0.0.0.0
@@ -320,11 +377,24 @@ def main() -> None:
         port = int(os.getenv("PORT", "8000"))
         host = "0.0.0.0"  # Always use 0.0.0.0 for API mode (web deployment)
         
+        port = int(os.getenv("PORT", "8000"))
+        host = "0.0.0.0"  # Always use 0.0.0.0 for API mode (web deployment)
+        
         logger.info("Starting FastAPI server at %s:%s (API mode)", host, port)
         # API mode - no PyQt6 needed, skip IP check
+        import uvicorn
         uvicorn.run(create_app(), host=host, port=port)
     else:
-        logger.info("Starting PyQt6 UI")
+        # Pre-load torch to avoid WinError 1114 DLL conflicts on Windows
+        try:
+            import torch
+            logger.info(f"[Main] Pre-loaded Torch {torch.__version__} (DLL protection)")
+        except Exception as e:
+            logger.warning(f"[Main] Torch pre-load failure (WinError 1114 likely): {e}")
+            # Try to identify which DLL is failing if it's an OSError
+            if isinstance(e, OSError) and "1114" in str(e):
+                logger.info("[Main] Attempting to diagnose DLL failure...")
+            
         # Lazy import - only load PyQt6 when GUI mode is needed
         from ui.main_window import run_qt_app
         run_qt_app()

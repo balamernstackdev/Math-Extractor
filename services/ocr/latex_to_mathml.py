@@ -20,155 +20,280 @@ from core.logger import logger
 ET.register_namespace("", "http://www.w3.org/1998/Math/MathML")
 
 
+from services.ocr.pipeline_components.latex_normalizer import LatexNormalizer
+from services.ocr.pipeline_components.latex_validator import LatexValidator
+from services.ocr.pipeline_components.math_fx_fixer import MathFXFixer
+from services.ocr.pipeline_components.shared_types import MultilineInfo, ALIGNMENT_SPECS
+from services.ocr.pipeline_components.multiline_converter import MultilineConverter
+from services.ocr.pipeline_components.matrix_converter import MatrixConverter
+from services.ocr.pipeline_components.post_processor import PostProcessor
+
+MULTILINE_ENVIRONMENTS = ['align', 'aligned', 'eqnarray', 'gather', 'gathered', 'cases', 'split', 'multline']
+
+# Explicitly export for backward compatibility with tests
+__all__ = ['LatexToMathML', 'MultilineInfo', 'ALIGNMENT_SPECS']
+
+
 class LatexToMathML:
     """Convert clean LaTeX to MathML, with multi-line equation support."""
+    
+    def __init__(self):
+        self.normalizer = LatexNormalizer()
+        self.validator = LatexValidator()
+        self.fixer = MathFXFixer()
+        self.multiline_conv = MultilineConverter()
+        self.matrix_conv = MatrixConverter()
+        self.post_processor = PostProcessor()
+        
+        # DEBUG: Check dependencies explicitly
+        try:
+            import lxml.etree
+            logger.info("[LatexToMathML] lxml.etree available")
+        except ImportError as e:
+            logger.error(f"[LatexToMathML] lxml.etree MISSING: {e}")
+            
+        try:
+            import latex2mathml.converter
+            logger.info("[LatexToMathML] latex2mathml available")
+        except ImportError as e:
+            logger.error(f"[LatexToMathML] latex2mathml MISSING: {e}")
+
+    def _validate_latex(self, latex: str) -> tuple[bool, str]:
+        """Shim for backward compatibility with tests."""
+        return self.validator.validate(latex)
+
+    def detect_multiline_equation(self, latex: str) -> Optional[MultilineInfo]:
+        """Shim for backward compatibility with tests."""
+        return self.multiline_conv.detect(latex)
+
+    def _get_column_alignment(self, info: MultilineInfo) -> str:
+        """Shim for backward compatibility with tests."""
+        return self.multiline_conv.get_alignment(info)
+
+    def _parse_aligned_line(self, line: str, environment: str) -> List[str]:
+        """Shim for backward compatibility with tests."""
+        return self.multiline_conv.parse_line(line, environment)
+
+    def _repair_common_ocr_errors(self, latex: str) -> str:
+        """Restore missing legacy method for tests."""
+        return self.normalizer.normalize(latex)
+
+    def detect_probability_of_error(self, latex: str) -> bool:
+        """Restore missing legacy method for tests."""
+        patterns = [r'P_r', r'P_e', r'P\{', r'P\(']
+        return any(re.search(p, latex) for p in patterns)
+
+
+    def _apply_mml_prefixes(self, mathml: str) -> str:
+        """
+        Add 'mml:' prefix to all MathML tags and ensure xmlns:mml declaration.
+        This changes <math> to <mml:math>, <mi> to <mml:mi>, etc.
+        """
+        if not mathml:
+            return mathml
+            
+        # 1. Add prefixes to opening tags
+        # Match <tag where tag doesn't start with mml:, /, !, ?
+        mathml = re.sub(r'<(?!(?:mml:|/|!|\?))([a-zA-Z0-9]+)', r'<mml:\1', mathml)
+        
+        # 2. Add prefixes to closing tags
+        # Match </tag where tag doesn't start with mml:
+        mathml = re.sub(r'</(?!(?:mml:))([a-zA-Z0-9]+)', r'</mml:\1', mathml)
+        
+        # 3. Add xmlns:mml declaration to root math tag if not present
+        if 'xmlns:mml=' not in mathml and '<mml:math' in mathml:
+            # We add it to the first <mml:math tag we find
+            mathml = mathml.replace('<mml:math', '<mml:math xmlns:mml="http://www.w3.org/1998/Math/MathML"', 1)
+            
+        return mathml
 
     def convert(self, latex: str) -> str:
+        """
+        Convert LaTeX to MathML.
+        """
+        try:
+            # Internal conversion (returns standard MathML)
+            mathml = self._convert_internal(latex)
+            
+            # Fix unbalanced fences specifically for cases/array environments (e.g. missing closing fence)
+            mathml = self._fix_unbalanced_cases(mathml)
+            
+            return mathml
+        except Exception as e:
+            logger.error(f"LatexToMathML.convert failure: {e}")
+            return f'<math xmlns="http://www.w3.org/1998/Math/MathML" display="block" data-error="conversion-failure" data-details="{str(e)[:100]}"/>'
+
+    def _convert_internal(self, latex: str) -> str:
         if not latex or not latex.strip():
-            # Return empty MathML instead of <mtext> with empty string
             return '<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"></math>'
 
         original = latex
 
-        # Remove math delimiters if present: $ ... $
-        latex = latex.strip()
-        if latex.startswith("$") and latex.endswith("$"):
-            latex = latex[1:-1].strip()
+        # 1. Pipeline: Normalization (Includes OCR fixes now)
+        latex = self.normalizer.normalize(latex)
 
-        # Normalize redundant pix2tex verbosity (e.g., repeated \displaystyle)
-        latex = self._normalize_pix2tex_noise(latex)
+        # CRITICAL: Handle implicit newlines from OCR (which LaTeX treats as space)
+        # If we have newlines but no '\\', convert them to '\\' to force multiline display
+        if '\n' in latex and '\\\\' not in latex and '\\begin' not in latex:
+             logger.info("Converting implicit newlines to backslashes for multiline display structure")
+             latex = latex.replace('\n', ' \\\\ ')
 
-        # CRITICAL: Check for truncated LaTeX BEFORE any repairs
-        # If LaTeX ends with unmatched braces (e.g., {{), it's truncated and should be rejected
-        open_braces = latex.count('{')
-        close_braces = latex.count('}')
-        if open_braces > close_braces:
-            # Check if LaTeX ends with unmatched opening braces (truncated)
-            if re.search(r'\{+\s*$', latex):
-                logger.warning("Truncated LaTeX detected (ends with unmatched braces) - rejecting conversion")
-                raise ValueError(f"Truncated LaTeX detected: ends with unmatched opening braces (count: {open_braces - close_braces})")
+        # 2. Pipeline: Validation
+        is_valid, error = self.validator.validate(latex)
+        if not is_valid:
+            logger.warning(f"Validation Warning: {error}")
+            if "Truncated" in error:
+                raise ValueError(error)
 
-        # Repair common pix2tex truncations before structure checks
-        # BUT: Only repair if not already detected as truncated above
-        if "\\begin{array" in latex and "\\end{array" not in latex:
-            latex = latex + r"\end{array}"
-        if r"\left|" in latex and r"\right|" not in latex:
-            latex = latex + r"\right|"
-        brace_diff = latex.count("{") - latex.count("}")
-        if 0 < brace_diff <= 3:
-            latex = latex + "}" * brace_diff
-        
-        # CRITICAL: Only unwrap arrays if they actually contain multiple lines
-        # Single-line equations wrapped in arrays should be converted as single-line
-        array_unwrapped = self._unwrap_simple_array(latex)
-        if array_unwrapped is not None:
-            # Check if unwrapped content has actual line breaks (\\ or \n)
-            # Count actual non-empty lines after splitting
-            split_lines = [line.strip() for line in re.split(r'\\\\|\n|\r\n|\r', array_unwrapped) if line.strip()]
-            if len(split_lines) > 1:
-                # Multiple lines - convert as multiline
-                logger.debug("Array contains %d lines, converting as multiline", len(split_lines))
-                return self._convert_multiline(array_unwrapped)
-            else:
-                # Single line in array - convert as single line (remove array wrapper)
-                logger.debug("Array contains single line, converting as single-line equation")
-                # The unwrapped content is already the line content, just convert it
-                return self._convert_single_line(array_unwrapped)
+        # 3. Extract labels (preserve them separate from AST)
+        equation_label, latex = self._extract_label(latex)
 
-        # Handle unclosed or malformed array environments by unwrapping to multiline
-        unclosed_body = self._extract_unclosed_array_body(latex)
-        if unclosed_body is not None:
-            # Collapse excessive \qquad runs
-            unclosed_body = self._collapse_quads(unclosed_body)
-            return self._convert_multiline(unclosed_body)
-
-        # Check if this is a matrix equation
-        if self._is_matrix_equation(latex):
-            return self._convert_matrix_equation(latex)
-
-        # Check if this is a multi-line equation
-        if self._is_multiline_equation(latex):
-            return self._convert_multiline(latex)
-
-        # CRITICAL: For single-line equations, normalize whitespace but preserve structure
-        # Collapse multiple spaces/newlines to single space to ensure it stays single-line
-        latex_normalized = " ".join(latex.split())
-        
-        # Extract equation label if present (e.g., "(v)", "(ii)") and handle separately
-        label_match = re.match(r'^\(([^)]+)\)\s*(.*)$', latex_normalized)
-        equation_label = None
-        if label_match:
-            equation_label = label_match.group(1)
-            latex_normalized = label_match.group(2).strip()
-
+        # 4. Convert using Semantic AST (Primary Path)
         try:
-            mathml = latex2mathml_convert(latex_normalized)
-            mathml = self._ensure_namespace(mathml)
-            mathml = self._normalize_operator_tags(mathml)
-            # CRITICAL: Clean invalid MathML (literal LaTeX commands, corrupted text)
-            mathml = self._clean_invalid_mathml(mathml)
+            from services.ocr.latex_parser import LaTeXParser
+            from services.ocr.ast_to_mathml import ASTToMathMLSerializer
             
-            # If there's a label, wrap the entire equation in <mrow> and prepend label as <mtext>
-            if equation_label:
-                try:
-                    root = ET.fromstring(mathml)
-                    # Get the content inside <math> tag
-                    math_content = list(root)
-                    
-                    # Create new structure: <mrow><mtext>(v)</mtext><mspace/><content/></mrow>
-                    mrow = ET.Element("mrow")
-                    
-                    # Add label
-                    mtext_label = ET.SubElement(mrow, "mtext")
-                    mtext_label.text = f"({equation_label})"
-                    
-                    # Add spacing
-                    mspace = ET.SubElement(mrow, "mspace", width="0.5em")
-                    
-                    # Move all original content into mrow
-                    for elem in math_content:
-                        mrow.append(elem)
-                    
-                    # Replace content in root
-                    root.clear()
-                    root.append(mrow)
-                    
-                    mathml = ET.tostring(root, encoding="unicode", method="xml")
-                except Exception as label_exc:
-                    logger.warning("Failed to add equation label to MathML: %s", label_exc)
-                    # Continue with unlabeled MathML
+            parser = LaTeXParser()
+            serializer = ASTToMathMLSerializer()
             
-            # Add display="block" for better rendering
-            if '<math' in mathml and 'display=' not in mathml:
-                mathml = mathml.replace('<math', '<math display="block"', 1)
-            return mathml
-
-        except Exception as exc:
-            error_msg = f"{type(exc).__name__}: {str(exc)}"
-            logger.warning("LaTeX→MathML failed: %s | Input (first 200 chars): %s", error_msg, original[:200])
-            logger.debug("Full LaTeX input: %s", original)
-            # CRITICAL: NEVER create MathML with LaTeX in <mtext> - this violates gatekeeper rules
-            # Instead, raise error to let pipeline handle recovery
-            raise ValueError(f"LaTeX→MathML conversion failed: {error_msg}. LaTeX input: {original[:200]}")
-
-    # ---------------------------------------------------------
-    # Helpers
-    # ---------------------------------------------------------
-    def _ensure_namespace(self, mathml: str) -> str:
-        """Ensure MathML output contains proper namespace."""
-        if "<math" not in mathml:
-            return f'<math xmlns="http://www.w3.org/1998/Math/MathML">{mathml}</math>'
-
-        # Add namespace if missing
-        if 'xmlns="' not in mathml:
-            mathml = mathml.replace(
-                "<math", '<math xmlns="http://www.w3.org/1998/Math/MathML"'
+            # Parse
+            ast = parser.parse(latex)
+            
+            # Check for trivial fallback logic in Parser
+            # If the parser failed recursively, it might return equation -> [symbol(full_latex)]
+            is_trivial_fallback = (
+                ast.node_type == "equation" 
+                and len(ast.children) == 1 
+                and ast.children[0].node_type == "symbol"
+                and len(ast.children[0].value or "") > 20 # Only if it's a long string (not just 'x')
             )
+            
+            if is_trivial_fallback:
+                logger.warning("Parser returned trivial fallback - attempting legacy regex.")
+                raise ValueError("Parser returned trivial fallback")
 
-        # Remove duplicate xmlns attributes (sometimes added upstream)
-        mathml = re.sub(r'\s+xmlns="http://www\.w3\.org/1998/Math/MathML"(?![^>]*xmlns)', '', mathml, count=0)
+            # Serialize
+            mathml = serializer.serialize(ast)
+            
+            if mathml and '<math' in mathml:
+                # 5. Post-process (Standardize namespace/attributes)
+                # Note: Serializer already adds namespace/display, but PostProcessor ensures it.
+                mathml = self.post_processor.ensure_namespace(mathml)
+                mathml = self.fixer.enforce_limits(mathml)
+                
+                # 6. Re-attach label
+                if equation_label:
+                    mathml = self._attach_label(mathml, equation_label)
+                
+                # 7. Final attributes
+                mathml = self._ensure_block_display(mathml)
+                return mathml
 
+        except Exception as ast_exc:
+            logger.warning(f"AST Conversion failed: {ast_exc}, falling back to regex extraction.")
+            # Fallthrough to legacy
+            pass
+            
+        # 5. Legacy Regex Conversion (Fallback)
+        # Only reached if Parser crashes or gives trivial output
+        mathml = latex2mathml_convert(latex)
+        
+        # Post-process legacy output
+        mathml = self.post_processor.ensure_namespace(mathml)
+        mathml = self._normalize_operator_tags(mathml) 
+        mathml = self.post_processor.clean_invalid_mathml(mathml)
+        mathml = self.fixer.enforce_limits(mathml)
+
+        if equation_label:
+            mathml = self._attach_label(mathml, equation_label)
+        
+        mathml = self._ensure_block_display(mathml)
         return mathml
+
+    def _apply_critical_fixes(self, latex: str) -> str:
+        """Apply critical regex-based fixes for common LaTeX issues."""
+        try:
+             # 1. Wrap text keywords in \text{} to prevent them being parsed as variables
+             # Pattern: "} for {" or ") for =" or "∈ E for i"
+             latex = re.sub(r'(?<=[)}\s∈=])\s+(for|and|where|if)\s+(?=[=(∈\\a-z])', 
+                           r' \\quad \\text{\1} \\quad ', latex)
+
+             # 2. Fix missing space after operators - REMOVED (Too aggressive, breaks \inf, \left, \leqq)
+             # latex = re.sub(r'\\(le|ge|leq|geq|in|to|neq|sim|approx)(?=[A-Za-z0-9])', r'\\\1 ', latex)
+
+             # Match \equiv not followed by space, replace with \equiv + space
+             latex = re.sub(r'\\equiv(?=[^a-zA-Z])', r'\\equiv ', latex)
+
+             # CRITICAL FIX for User Feedback "Paragraph style is confusion"
+             # 1. Strip \left and \right commands to prevent them from appearing as literal text
+             #    if the converter fails to parse them. Standard delimiters [ ] ( ) will render fine.
+             latex = latex.replace(r'\left', '')
+             latex = latex.replace(r'\right', '')
+
+             # 2. Fix \le and \ge appearing as text
+             latex = re.sub(r'\\le(?=[^a-zA-Z])', r'\\leq', latex) # \leX -> \leqX
+             latex = re.sub(r'\\le\s+', r'\\leq ', latex)           # \le X -> \leq X
+             latex = re.sub(r'\\ge(?=[^a-zA-Z])', r'\\geq', latex)
+             latex = re.sub(r'\\ge\s+', r'\\geq ', latex)
+
+             # 3. Force display style limits for clearer, non-inline summation/products
+             #    Replace \sum_{...} with \sum\limits_{...}
+             latex = re.sub(r'\\(sum|prod|lim|max|min|sup|inf|bigcap|bigcup)(?=\s*_)', r'\\\1\\limits', latex)
+             
+             # Also replace \sim with \sim (no change needed usually, but check context)
+        except Exception:
+            pass
+            
+        # EXTRA NORMALIZATION for "Listing" artifacts
+        # If \mathit{...} contains LaTeX commands (starting with \), chances are it's an error or 
+        # latex2mathml will treat it as verbatim text. Unwrap it.
+        # Regex: \mathit{...\\[a-zA-Z]...}
+        # We greedily replace \mathit{<code>} with <code> if <code> contains \
+        # This is a heuristic.
+        try:
+            # 1. Specific fix for overlapping/hallucinated \mathit{\Big|} artifacts
+            if r'\mathit{\Big' in latex:
+                 latex = latex.replace(r'\mathit{\Big|}', r'\Big|')
+                 latex = latex.replace(r'\mathit{\Big', r'\Big')
+
+            # 2. General unwrap of \mathit if it contains '\'
+            # Note: robust brace matching is hard with regex, focusing on simple cases
+            latex = re.sub(r'\\mathit\{([^\}]*?\\[^\}]*?)\}', r'\1', latex)
+        except Exception:
+            pass
+
+        return latex
+
+    def _fallback_complex_equation(self, latex: str) -> str:
+        """
+        Fallback for very complex equations that fail latex2mathml.
+        Try to convert in a more robust way by simplifying.
+        """
+        logger.info("[Fallback] Attempting simplified conversion for complex equation")
+        
+        # Try wrapping in displaymath environment
+        try:
+            simplified = r'\[' + latex + r'\]'
+            mathml = latex2mathml_convert(simplified)
+            if mathml and '<math' in mathml:
+                return self._ensure_namespace(mathml)
+        except Exception:
+            pass
+        
+        # If that failed, try removing problematic constructs
+        try:
+            # Remove \limits commands (they might be causing issues)
+            simplified = latex.replace(r'\limits', '')
+            mathml = latex2mathml_convert(simplified)
+            if mathml and '<math' in mathml:
+                return self._ensure_namespace(mathml)
+        except Exception:
+            pass
+        
+        # Last resort: Return a placeholder MathML
+        logger.error("[Fallback] All conversion attempts failed")
+        raise ValueError("Complex equation conversion failed in fallback")
+
 
     def _clean_invalid_mathml(self, mathml: str) -> str:
         """
@@ -361,6 +486,105 @@ class LatexToMathML:
 
         return ET.tostring(root, encoding="unicode", method="xml")
 
+    def _fix_unbalanced_cases(self, mathml: str) -> str:
+        """
+        Fix unbalanced fences specifically for cases blocks generated by latex2mathml.
+        latex2mathml often outputs <mrow><mo>{...</mo><mtable>...</mtable></mrow> without a closing fence.
+        This triggers strict validation errors.
+        """
+        if not mathml or ('<mtable' not in mathml):
+            return mathml
+        
+        try:
+            # Register namespace to avoid "ns0" prefixes in output
+            ET.register_namespace("", "http://www.w3.org/1998/Math/MathML")
+            
+            # Simple check before parsing
+            # Check for left brace characters (text or entity)
+            if "{" not in mathml and "&#x0007B;" not in mathml and "&#123;" not in mathml and "&#x7B;" not in mathml:
+                return mathml
+                
+            try:
+                root = ET.fromstring(mathml)
+            except ET.ParseError:
+                return mathml
+
+            changed = False
+            
+            # Determine namespace from root tag
+            uri = ""
+            if '}' in root.tag:
+                uri = root.tag.split('}')[0] + "}"
+            
+            # Helper to check if node is { fence
+            def is_left_brace(node):
+                tag = node.tag
+                # Strip namespace if present for tag check
+                local_tag = tag.split('}')[-1] if '}' in tag else tag
+                if local_tag != 'mo': return False
+                
+                text = (node.text or "").strip()
+                return text in ["{", "&#x0007B;", "&#123;", "\\{", "&#x7B;"]
+            
+            # Iterate over all mrows (using detected namespace)
+            for mrow in root.iter(f"{uri}mrow"):
+                # We expect structure: <mo>{...</mo> <mtable>...
+                # Check children
+                children = list(mrow)
+                if len(children) >= 2:
+                    first = children[0]
+                    first_text = (first.text or "").strip()
+                    
+                    second = children[1]
+                    
+                    # Check first element is left brace
+                    if is_left_brace(first):
+                        # Get local tag for second element check
+                        second_tag = second.tag.split('}')[-1] if '}' in second.tag else second.tag
+                                                
+                        # Check second element is mtable (or mstyle wrapping mtable)
+                        is_table_structure = second_tag == 'mtable'
+                        
+                        # Sometimes latex2mathml puts mstyle around mtable
+                        if not is_table_structure and second_tag == 'mstyle' and len(second) > 0:
+                             child_tag = second[0].tag.split('}')[-1] if '}' in second[0].tag else second[0].tag
+                             if child_tag == 'mtable':
+                                 is_table_structure = True
+
+                        if is_table_structure:
+                            # Check if last element is a closing fence
+                            last = children[-1]
+                            is_closed = False
+                            
+                            last_tag = last.tag.split('}')[-1] if '}' in last.tag else last.tag
+                            
+                            # Check if the last element is an operator that looks like a fence
+                            if last_tag == 'mo':
+                                # It's an operator, assume it's a fence if it explicitly says so
+                                # OR if it is empty (invisible fence) 
+                                if last.get('fence') == 'true' or not (last.text or "").strip() or last.text == ".":
+                                    is_closed = True
+                            
+                            if not is_closed:
+                                # Add closing invisible fence
+                                close_fence = ET.Element(f"{uri}mo")
+                                close_fence.set("stretchy", "true")
+                                close_fence.set("fence", "true")
+                                close_fence.set("form", "postfix")
+                                # Empty text for invisible fence
+                                close_fence.text = "" 
+                                mrow.append(close_fence)
+                                changed = True
+            
+            if changed:
+                 return ET.tostring(root, encoding="unicode", method="xml")
+                 
+            return mathml
+            
+        except Exception as e:
+            logger.warning(f"Error fixing cases fences: {e}")
+            return mathml
+
     def _unwrap_simple_array(self, latex: str) -> str | None:
         """
         Detect a simple \\begin{array}{c} ... \\end{array} wrapper (single column)
@@ -408,53 +632,584 @@ class LatexToMathML:
 
         return " \\\\ ".join(cleaned_rows)
 
+    def _split_latex_smart(self, latex: str) -> List[str]:
+        """
+        Split LaTeX string by '\\\\' or '\\cr' respecting nested environments and braces.
+        Does NOT split inside { }, \\begin{...}...\\end{...}, or \\left...\\right.
+        
+        Enhanced to handle 3+ nested levels properly using environment stack.
+        """
+        if not latex:
+            return []
+        
+        # Track environment stack (for \begin{...} \end{...})
+        env_stack = []
+        
+        # Track delimiter stack (for \left \right)
+        delimiter_depth = 0
+        
+        # Track brace depth (for { })
+        brace_depth = 0
+        
+        # Result parts
+        parts = []
+        current_part = []
+        
+        i = 0
+        while i < len(latex):
+            # Check for \begin{...}
+            if latex[i:i+7] == r'\begin{':
+                # Extract environment name
+                j = i + 7
+                while j < len(latex) and latex[j] != '}':
+                    j += 1
+                if j < len(latex):
+                    env_name = latex[i+7:j]
+                    env_stack.append(env_name)
+                    current_part.append(latex[i:j+1])
+                    i = j + 1
+                    continue
+            
+            # Check for \end{...}
+            if latex[i:i+5] == r'\end{':
+                # Extract environment name
+                j = i + 5
+                while j < len(latex) and latex[j] != '}':
+                    j += 1
+                if j < len(latex):
+                    env_name = latex[i+5:j]
+                    # Pop matching environment
+                    if env_stack and env_stack[-1] == env_name:
+                        env_stack.pop()
+                    current_part.append(latex[i:j+1])
+                    i = j + 1
+                    continue
+            
+            # Check for \left
+            if latex[i:i+5] == r'\left':
+                delimiter_depth += 1
+                # Include the delimiter character
+                j = i + 5
+                while j < len(latex) and latex[j] in ' \t':
+                    j += 1
+                if j < len(latex):
+                    current_part.append(latex[i:j+1])
+                    i = j + 1
+                    continue
+            
+            # Check for \right
+            if latex[i:i+6] == r'\right':
+                delimiter_depth = max(0, delimiter_depth - 1)
+                # Include the delimiter character
+                j = i + 6
+                while j < len(latex) and latex[j] in ' \t':
+                    j += 1
+                if j < len(latex):
+                    current_part.append(latex[i:j+1])
+                    i = j + 1
+                    continue
+            
+            # Track braces
+            if latex[i] == '{':
+                brace_depth += 1
+                current_part.append(latex[i])
+                i += 1
+                continue
+            
+            if latex[i] == '}':
+                brace_depth = max(0, brace_depth - 1)
+                current_part.append(latex[i])
+                i += 1
+                continue
+            
+            # Check for line break: \\ or \cr
+            # Only split if we're at top level (no active environments, delimiters, or braces)
+            if (latex[i:i+2] == r'\\' and i+2 < len(latex) and latex[i+2] not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'):
+                # This is \\ (line break), not a command like \left
+                if env_stack == [] and delimiter_depth == 0 and brace_depth == 0:
+                    # Top level - split here
+                    parts.append(''.join(current_part))
+                    current_part = []
+                    i += 2
+                    # Skip optional spacing after \\
+                    while i < len(latex) and latex[i] in ' \t\r\n':
+                        i += 1
+                    continue
+                else:
+                    # Inside environment/braces - don't split
+                    current_part.append(latex[i:i+2])
+                    i += 2
+                    continue
+            
+            if latex[i:i+3] == r'\cr':
+                # \cr line break
+                if env_stack == [] and delimiter_depth == 0 and brace_depth == 0:
+                    # Top level - split here
+                    parts.append(''.join(current_part))
+                    current_part = []
+                    i += 3
+                    # Skip optional spacing
+                    while i < len(latex) and latex[i] in ' \t\r\n':
+                        i += 1
+                    continue
+                else:
+                    # Inside environment - don't split
+                    current_part.append(latex[i:i+3])
+                    i += 3
+                    continue
+            
+            # Regular character
+            current_part.append(latex[i])
+            i += 1
+        
+        # Add remaining part
+        if current_part:
+            parts.append(''.join(current_part))
+        
+        # Return non-empty parts
+        return [part.strip() for part in parts if part.strip()]
+
+    def _split_latex_aggressive(self, latex: str) -> list[str]:
+        """
+        Aggressively split LaTeX by '\\' or '\\cr', ignoring all but environment depth.
+        Useful for malformed inputs where braces/delimiters are unbalanced.
+        """
+        if not latex:
+            return []
+            
+        env_stack = []
+        parts = []
+        current_part = []
+        i = 0
+        
+        while i < len(latex):
+            # Check for \\begin{...}
+            if latex[i:i+7] == r'\begin{':
+                j = i + 7
+                while j < len(latex) and latex[j] != '}':
+                    j += 1
+                if j < len(latex):
+                    env_name = latex[i+7:j]
+                    env_stack.append(env_name)
+                    current_part.append(latex[i:j+1])
+                    i = j + 1
+                    continue
+            
+            # Check for \\end{...}
+            if latex[i:i+5] == r'\end{':
+                j = i + 5
+                while j < len(latex) and latex[j] != '}':
+                    j += 1
+                if j < len(latex):
+                    env_name = latex[i+5:j]
+                    if env_stack and env_stack[-1] == env_name:
+                        env_stack.pop()
+                    current_part.append(latex[i:j+1])
+                    i = j + 1
+                    continue
+            
+            # Check for line break: \\ or \\cr
+            # Only split if we're at top level (no active environments)
+            # IGNORE brace_depth and delimiter_depth
+            if (latex[i:i+2] == r'\\' and i+2 < len(latex) and latex[i+2] not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'):
+                if env_stack == []:
+                    parts.append(''.join(current_part))
+                    current_part = []
+                    i += 2
+                    while i < len(latex) and latex[i] in ' \t\r\n':
+                        i += 1
+                    continue
+                else:
+                    current_part.append(latex[i:i+2])
+                    i += 2
+                    continue
+            
+            if latex[i:i+3] == r'\cr':
+                if env_stack == []:
+                    parts.append(''.join(current_part))
+                    current_part = []
+                    i += 3
+                    while i < len(latex) and latex[i] in ' \t\r\n':
+                        i += 1
+                    continue
+                else:
+                    current_part.append(latex[i:i+3])
+                    i += 3
+                    continue
+            
+            # Regular character
+            current_part.append(latex[i])
+            i += 1
+        
+        if current_part:
+            parts.append(''.join(current_part))
+        
+        return [part.strip() for part in parts if part.strip()]
+
+
+    def detect_multiline_equation(self, latex: str) -> MultilineInfo:
+        """
+        Detect if LaTeX is multiline and extract structural metadata.
+        
+        This is the ENHANCED detection that preserves mathematical structure.
+        Returns comprehensive metadata to enable proper MathML generation.
+        
+        Args:
+            latex: LaTeX string to analyze
+            
+        Returns:
+            MultilineInfo with full structure analysis
+        """
+        info = MultilineInfo()
+        
+        # Tier 1: EXPLICIT ENVIRONMENT DETECTION (99% confidence)
+        env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+        env_match = re.search(env_pattern, latex)
+        
+        if env_match:
+            env_name = env_match.group(1)
+            info.is_multiline = True
+            info.environment = env_name
+            info.alignment_spec = ALIGNMENT_SPECS.get(env_name, 'left')
+            
+            logger.info(f"[Multiline] Detected environment: {env_name}")
+            
+            # Count lines within environment (count \\ or \cr)
+            env_content = self._extract_environment_content(latex, env_name)
+            if env_content:
+                info.line_count = env_content.count(r'\\') + env_content.count(r'\cr') + 1
+                
+                # Count columns (based on & markers)
+                lines = env_content.split(r'\\')
+                if lines:
+                    # Count & in first line to determine columns
+                    first_line = lines[0]
+                    ampersand_count = first_line.count('&')
+                    info.column_count = ampersand_count + 1 if ampersand_count > 0 else 1
+                    info.has_alignment_markers = ampersand_count > 0
+            
+            logger.info(f"[Multiline] Structure: {info}")
+            return info
+        
+        # Tier 2: LINE BREAK DETECTION (95% confidence)
+        # Check for \\ line breaks (not part of command like \\left)
+        if re.search(r'\\\\(?![a-zA-Z])', latex):
+            info.is_multiline = True
+            info.environment = 'manual'
+            info.line_break_char = r'\\'
+            
+            # Use smart splitting to count actual top-level lines
+            parts = self._split_latex_smart(latex)
+            
+            # Fallback: If minimal split detected but LaTeX contains line breaks, try aggressive split
+            # This handles cases where braces/delimiters are unbalanced or wrapping lines (common in truncated/OCR LaTeX)
+            if len(parts) <= 1:
+                aggressive_parts = self._split_latex_aggressive(latex)
+                if len(aggressive_parts) > 1:
+                    logger.info("[Multiline] detection: Smart split failed (likely unbalanced), used aggressive split")
+                    parts = aggressive_parts
+
+            non_empty_parts = [p for p in parts if p.strip()]
+            info.line_count = len(non_empty_parts)
+            
+            # Check for alignment markers in first line
+            if non_empty_parts:
+                first_line = non_empty_parts[0]
+                ampersand_count = first_line.count('&')
+                if ampersand_count > 0:
+                    info.has_alignment_markers = True
+                    info.column_count = ampersand_count + 1
+                    # Guess alignment based on column count
+                    if ampersand_count == 1:
+                        info.alignment_spec = 'right left'  # Probably x &= expr
+                    elif ampersand_count == 2:
+                        info.alignment_spec = 'right center left'  # Probably x &=& y
+                    else:
+                        info.alignment_spec = 'left'
+                else:
+                    # No alignment markers, left-align by default
+                    info.alignment_spec = 'left'
+                    info.column_count = 1
+            
+            logger.info(f"[Multiline] Manual line breaks detected: {info}")
+            return info
+        
+        # Also check for \cr
+        if r'\cr' in latex:
+            info.is_multiline = True
+            info.environment = 'manual'
+            info.line_break_char = r'\cr'
+            info.line_count = latex.count(r'\cr') + 1
+            info.alignment_spec = 'left'
+            logger.info(f"[Multiline] \\cr line breaks detected: {info}")
+            return info
+        
+        # Tier 3: VISUAL/HEURISTIC DETECTION (70% confidence)
+        # Check for literal newlines with math content
+        lines = latex.split('\n')
+        math_lines = [line for line in lines if line.strip() and any(c in line for c in ['=', '+', '-', '\\', '{', '}'])]
+        
+        if len(math_lines) >= 2:
+            logger.info(f"[Multiline] Detected {len(math_lines)} lines with math content (literal newlines)")
+            info.is_multiline = True
+            info.environment = 'visual'
+            info.line_break_char = '\n'
+            info.line_count = len(math_lines)
+            info.alignment_spec = 'left'
+            return info
+        
+        # Not multiline
+        logger.debug("[Multiline] Single-line equation")
+        return info
+    
+    def _extract_environment_content(self, latex: str, env_name: str) -> Optional[str]:
+        """Extract content between \\begin{env} and \\end{env}."""
+        pattern = rf'\\begin\{{{env_name}\}}(.*?)\\end\{{{env_name}\}}'
+        match = re.search(pattern, latex, re.DOTALL)
+        return match.group(1).strip() if match else None
+    
     def _is_multiline_equation(self, latex: str) -> bool:
-        """Detect if LaTeX represents a multi-line equation."""
-        # CRITICAL: Be VERY strict - only treat as multiline if there are explicit line breaks
-        # Single equations with labels like "(ii)" should NOT be treated as multiline
-        # Equations that flow horizontally (even with formatting line breaks) should be single-line
+        """
+        DEPRECATED: Use detect_multiline_equation() instead.
+        Kept for backward compatibility.
+        """
+        info = self.detect_multiline_equation(latex)
+        return info.is_multiline
+
+    
+    # ==========================================================================
+    # ALIGNMENT-AWARE LINE PARSING (Phase 2)
+    # ==========================================================================
+    
+    def _parse_aligned_line(self, line: str, environment: str) -> List[str]:
+        """
+        Split a single line of aligned equation into column cells.
         
-        # Check for explicit line breaks (double backslash or \cr) - these indicate true multiline
-        if "\\\\" in latex or "\\cr" in latex:
-            # But check if it's just formatting - if there's only one \\ and the equation flows,
-            # it might still be semantically single-line
-            line_break_count = latex.count("\\\\") + latex.count("\\cr")
-            if line_break_count > 0:
-                # Check if it's in an array or align environment (definitely multiline)
-                if re.search(r'\\begin\{(array|align|aligned|eqnarray|split|multline|gather)', latex, re.IGNORECASE):
-                    return True
-                # If there are multiple line breaks, it's likely multiline
-                if line_break_count > 1:
-                    return True
-                # Single line break might be formatting - be conservative and treat as single-line
-                # unless it's clearly in a multiline structure
-                logger.debug("Single line break detected, treating as single-line equation (may be formatting)")
-                return False
+        This preserves mathematical structure by respecting & alignment markers.
         
-        # Check for align environments (explicit multiline environments)
-        if re.search(r'\\begin\{(align|aligned|eqnarray|split|multline|gather)', latex, re.IGNORECASE):
-            return True
+        Args:
+            line: Single line of LaTeX (e.g., "x &= a + b")
+            environment: Environment type ('align', 'eqnarray', 'cases', etc.)
         
-        # Check for array environments with multiple rows
-        array_match = re.search(r'\\begin\{array\}', latex, re.IGNORECASE)
-        if array_match:
-            # Check if array body contains line breaks
-            array_body_match = re.search(r'\\begin\{array\}\{[^}]*\}(.*?)\\end\{array\}', latex, re.DOTALL | re.IGNORECASE)
-            if array_body_match:
-                array_body = array_body_match.group(1)
-                # Count actual line breaks in array body
-                line_breaks_in_body = array_body.count("\\\\") + array_body.count("\\cr")
-                if line_breaks_in_body > 0:
-                    return True
+        Returns:
+            List of cell contents for each <mtd>
+            
+        Examples:
+            _parse_aligned_line("x &= a", "align") → ["x", "= a"]
+            _parse_aligned_line("a &=& b", "eqnarray") → ["a", "=", "b"]
+            _parse_aligned_line("x^2 & \\text{if } x > 0", "cases") → ["x^2", "\\text{if } x > 0"]
+        """
+        if environment in ['align', 'aligned', 'split']:
+            # Split at &, create 2 columns (left & right)
+            parts = line.split('&', maxsplit=1)
+            if len(parts) == 1:
+                # No & found, put everything in right column (left-aligned)
+                return ['', parts[0].strip()]
+            return [parts[0].strip(), parts[1].strip()]
         
-        # CRITICAL: Do NOT treat single equations with newlines as multiline
-        # Many single-line equations have newlines for formatting but are semantically single-line
-        # Only treat as multiline if there are explicit line breaks (\\ or \cr) in multiline environments
+        elif environment == 'eqnarray':
+            # Split at &, create 3 columns (LHS & operator & RHS)
+            parts = line.split('&')
+            if len(parts) >= 3:
+                return [parts[0].strip(), parts[1].strip(), parts[2].strip()]
+            elif len(parts) == 2:
+                # Only one &, treat as align-style
+                return [parts[0].strip(), parts[1].strip(), '']
+            else:
+                # No &, center in middle column
+                return ['', parts[0].strip(), '']
         
-        return False
+        elif environment in ['cases', 'matrix', 'pmatrix', 'bmatrix', 'vmatrix']:
+            # cases: expression & condition
+            # matrices: elements separated by &
+            parts = line.split('&')
+            return [part.strip() for part in parts]
+        
+        elif environment == 'array':
+            # Custom alignment from preamble, split at all &
+            parts = line.split('&')
+            return [part.strip() for part in parts]
+        
+        else:
+            # Unknown environment or 'manual', single column
+            return [line.strip()]
+    
+    def _get_column_alignment(self, info: MultilineInfo) -> str:
+        """
+        Get the MathML columnalign attribute for an equation.
+        
+        Args:
+            info: MultilineInfo from detection
+            
+        Returns:
+            Column alignment string (e.g., "right left", "center")
+        """
+        if info.alignment_spec:
+            return info.alignment_spec
+        
+        # Fallback based on environment
+        if info.environment:
+            return ALIGNMENT_SPECS.get(info.environment, 'left')
+        
+        # Default: left alignment
+        return 'left'
+    
+    def _create_mtable_row(self, cells: List[str], row_idx: int) -> str:
+        """
+        Create a single <mtr> (table row) from cell contents.
+        
+        Args:
+            cells: List of LaTeX strings for each cell
+            row_idx: Row index (for debugging)
+            
+        Returns:
+            MathML <mtr> element with <mtd> children
+        """
+        mtr_parts = ['  <mtr>']
+        
+        for cell_idx, cell_latex in enumerate(cells):
+            if not cell_latex.strip():
+                # Empty cell
+                mtr_parts.append('    <mtd></mtd>')
+            else:
+                try:
+                    # Convert cell LaTeX to MathML
+                    cell_mathml = latex2mathml_convert(cell_latex)
+                    
+                    # Extract content (remove outer <math> tags)
+                    cell_mathml = self._ensure_namespace(cell_mathml)
+                    cell_mathml = self._normalize_operator_tags(cell_mathml)
+                    
+                    # Remove <math>...</math> wrapper to get just the content
+                    content = re.sub(r'<math[^>]*>(.*?)</math>', r'\1', cell_mathml, flags=re.DOTALL)
+                    
+                    mtr_parts.append(f'    <mtd>{content.strip()}</mtd>')
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to convert cell [{row_idx},{cell_idx}]: {e} | LaTeX: {cell_latex[:50]}")
+                    # Fallback: wrap in mtext
+                    mtr_parts.append(f'    <mtd><mtext>{cell_latex}</mtext></mtd>')
+        
+        mtr_parts.append('  </mtr>')
+        return '\n'.join(mtr_parts)
+    
+    def _convert_multiline_aligned(self, latex: str, info: MultilineInfo) -> str:
+        """
+        Convert multiline LaTeX to MathML using alignment information (ENHANCED).
+        
+        This uses the comprehensive MultilineInfo to preserve mathematical structure
+        with proper <mtable columnalign="..."> attributes.
+        
+        Args:
+            latex: LaTeX string  
+            info: MultilineInfo from detect_multiline_equation()
+            
+        Returns:
+            MathML with proper table structure
+        """
+        try:
+            logger.info(f"[Multiline] Converting with alignment: {info}")
+            
+            # Get column alignment
+            columnalign = self._get_column_alignment(info)
+            
+            # Repair LaTeX first
+            latex = self._repair_latex_line(latex)
+            
+            # CRITICAL: If the entire input is wrapped in a multiline environment, unwrap it first
+            # to allow _split_latex_smart to see the internal line breaks.
+            env_was_unwrapped = False
+            if info.environment and info.environment not in ['manual', 'visual']:
+                # Use raw string concatenation to avoid f-string brace hell
+                env_name_esc = re.escape(info.environment)
+                prefix = r'^\s*(?:\\\[|\$\$)?\s*\\begin\{'
+                suffix = r'\s*(?:\\\]|\$\$)?\s*$'
+                pattern = prefix + env_name_esc + r'\*?\}(.*?)\\end\{' + env_name_esc + r'\*?\}' + suffix
+                env_match = re.search(pattern, latex, re.DOTALL | re.IGNORECASE)
+                if env_match:
+                    logger.info(f"[Multiline] Unwrapping dominant {info.environment} environment")
+                    latex = env_match.group(1).strip()
+                    env_was_unwrapped = True
+            
+            # Split into lines using smart splitting
+            if info.environment == 'visual' and '\n' in latex and '\\\\' not in latex:
+                logger.info("[Multiline] Splitting visual multiline by newline")
+                lines = [l.strip() for l in latex.split('\n') if l.strip()]
+            else:
+                lines = self._split_latex_smart(latex)
+                
+                # Fallback check
+                if len(lines) <= 1 and ("\\\\" in latex or "\\cr" in latex) and not env_was_unwrapped:
+                     aggressive_parts = self._split_latex_aggressive(latex)
+                     if len(aggressive_parts) > 1:
+                         logger.info("[Multiline] aligned conversion: Smart split failed (likely unbalanced), used aggressive split")
+                         lines = aggressive_parts
+            
+            if not lines:
+                logger.warning("[Multiline] No lines after splitting, falling back to single-line")
+                return self._convert_single_line(latex)
+            
+            # Remove empty lines
+            lines = [line.strip() for line in lines if line.strip()]
+            
+            if len(lines) <= 1 and not env_was_unwrapped:
+                # If only one line, and no environment was unwrapped, it's not truly a multiline 
+                # equation that needs our manual table structure (e.g., just f(x) = \begin{cases}...\end{cases})
+                logger.info("[Multiline] Only one line detected and no environment was unwrapped, falling back to single-line")
+                # But wait, if it's 'manual' but only one line? Fallback is still good.
+                return self._convert_single_line(latex)
+            
+            logger.info(f"[Multiline] Processing {len(lines)} lines with columnalign='{columnalign}'")
+            
+            # Build <mtable> structure
+            mtable_parts = [
+                '<math xmlns="http://www.w3.org/1998/Math/MathML" display="block">',
+                f'<mtable columnalign="{columnalign}" displaystyle="true">'
+            ]
+            
+            # Process each line
+            for row_idx, line_latex in enumerate(lines):
+                # Clean up line
+                line_latex = self._normalize_pix2tex_noise(line_latex)
+                line_latex = self._strip_outer_braces(line_latex)
+                
+                logger.debug(f"[Multiline] Line {row_idx+1}/{len(lines)}: {line_latex[:80]}")
+                
+                # Parse line into cells based on & markers
+                cells = self._parse_aligned_line(line_latex, info.environment or 'manual')
+                
+                logger.debug(f"[Multiline] Parsed into {len(cells)} cells: {cells}")
+                
+                # Create table row
+                try:
+                    row_mathml = self._create_mtable_row(cells, row_idx)
+                    mtable_parts.append(row_mathml)
+                except Exception as row_error:
+                    logger.error(f"[Multiline] Failed to create row {row_idx}: {row_error}")
+                    # Add error row
+                    mtable_parts.append(f'  <mtr><mtd><mtext>Error in row {row_idx+1}</mtext></mtd></mtr>')
+            
+            mtable_parts.append('</mtable>')
+            mtable_parts.append('</math>')
+            
+            mathml = '\n'.join(mtable_parts)
+            
+            # Post-process: Clean and normalize
+            mathml = self._clean_invalid_mathml(mathml)
+            mathml = self._normalize_operator_tags(mathml)
+            
+            logger.info(f"[Multiline] Generated MathML with {len(lines)} lines, alignment={columnalign}")
+            
+            return mathml
+            
+        except Exception as e:
+            logger.error(f"[Multiline] Alignment-aware conversion failed: {e}", exc_info=True)
+            # Fallback to old multiline method
+            logger.warning("[Multiline] Falling back to legacy multiline conversion")
+            return self._convert_multiline(latex)
 
     def _convert_multiline(self, latex: str) -> str:
-        """Convert multi-line LaTeX equation to structured MathML with mtable."""
+        """Convert multi-line LaTeX equation to structured MathML with mtable (LEGACY)."""
         try:
             # CRITICAL: Repair the entire LaTeX first before splitting into lines
             # This ensures \left/\right pairs that span multiple lines are fixed
@@ -494,8 +1249,12 @@ class LatexToMathML:
             math_elem = ET.Element("math", xmlns="http://www.w3.org/1998/Math/MathML", display="block")
             mtable = ET.SubElement(math_elem, "mtable", align="left")
             
-            # Process each line
-            logger.debug("Multiline conversion: processing %d lines", len(lines))
+            # Process each line (support up to 5 lines as requested)
+            logger.info("Multiline conversion: processing %d lines (max 5 supported)", len(lines))
+            if len(lines) > 5:
+                logger.warning("Equation has %d lines, but only processing first 5", len(lines))
+                lines = lines[:5]  # Limit to 5 lines
+            
             for idx, line_data in enumerate(lines):
                 line_latex = line_data.get("latex", "").strip()
                 line_label = line_data.get("label", None)
@@ -733,12 +1492,33 @@ class LatexToMathML:
         if array_match:
             latex_clean = array_match.group(1)
         
-        # First, try splitting by explicit line breaks
-        if "\\\\" in latex_clean or "\\cr" in latex_clean or "\n" in latex_clean:
-            # Split by line breaks
-            line_breaks = re.split(r'\\\\|\n|\r\n|\r', latex_clean)
+        # First, try splitting using smart logic that respects environments
+        # This handles \\ and \cr but avoids breaking inside cases/matrices
+        line_breaks = self._split_latex_smart(latex_clean)
+        
+        # Fallback: If minimal split detected but LaTeX contains line breaks, try aggressive split
+        # This handles cases where braces/delimiters are unbalanced or wrapping lines
+        if len(line_breaks) <= 1 and ("\\\\" in latex_clean or "\\cr" in latex_clean):
+             aggressive_parts = self._split_latex_aggressive(latex_clean)
+             if len(aggressive_parts) > 1:
+                 logger.warning("[Multiline] Smart split failed (likely unbalanced braces). Using aggressive split.")
+                 line_breaks = aggressive_parts
+
+        
+        # If we have multiple parts, process them
+        if len(line_breaks) > 1 or (len(line_breaks) == 1 and ("\\\\" in latex_clean or "\\cr" in latex_clean)):
+            # Process all lines (support up to 5 lines as requested)
+            max_lines = 5  # Support up to 5 lines as requested
             
-            for line in line_breaks:
+            for idx, line in enumerate(line_breaks):
+                # Warn if exceeding 5 lines but still process first 5
+                if idx >= max_lines:
+                    remaining = len(line_breaks) - max_lines
+                    if remaining > 0:
+                        logger.warning("Equation has more than %d lines (%d total). Processing first %d lines only.", 
+                                     max_lines, len(line_breaks), max_lines)
+                    break
+                
                 line = line.strip()
                 
                 # CRITICAL: Handle empty lines in arrays (e.g., {{}})
@@ -785,13 +1565,92 @@ class LatexToMathML:
                         "label": label
                     })
         
-        # CRITICAL: Do NOT use intelligent splitting for single-line equations
-        # Only split if there are explicit line breaks (\\ or \n)
-        # The "intelligent splitting" was causing single equations to be incorrectly split
-        # Single equations with operators like ≤ or - should stay as single line
-        # Only use multiline if there are explicit line breaks or align environments
+        # If no lines were found from explicit breaks, try intelligent splitting
+        # This handles equations that are naturally multi-line but don't have explicit separators
+        if not lines and len(latex_clean.strip()) > 50:  # Only for longer equations
+            # Look for patterns that suggest multiple lines:
+            # 1. Multiple = signs (could be multiple equations)
+            # 2. Multiple \leq, \geq, etc. (could be chained inequalities)
+            # 3. Natural breaks at operators like =, \leq, \geq
+            equals_count = latex_clean.count('=')
+            leq_count = latex_clean.count('\\leq') + latex_clean.count('\\le')
+            geq_count = latex_clean.count('\\geq') + latex_clean.count('\\ge')
+            
+            # If there are multiple equality/inequality operators, try splitting
+            if equals_count + leq_count + geq_count >= 2:
+                # Try splitting at =, \leq, \geq, \le, \ge
+                potential_lines = re.split(r'(?<!\\)(?:=|\\leq|\\geq|\\le|\\ge)', latex_clean)
+                if len(potential_lines) >= 2 and len(potential_lines) <= 5:
+                    logger.debug("Attempting intelligent splitting into %d lines", len(potential_lines))
+                    # Reconstruct lines with operators
+                    split_points = list(re.finditer(r'(?<!\\)(?:=|\\leq|\\geq|\\le|\\ge)', latex_clean))
+                    if split_points:
+                        current_pos = 0
+                        for i, match in enumerate(split_points):
+                            if i < len(potential_lines) - 1:
+                                line_content = latex_clean[current_pos:match.end()].strip()
+                                if line_content:
+                                    label = self._extract_equation_label(line_content)
+                                    if label:
+                                        line_content = re.sub(r'^\([^)]+\)\s*', '', line_content).strip()
+                                    lines.append({
+                                        "latex": line_content,
+                                        "label": label
+                                    })
+                                current_pos = match.end()
+                        
+                        # Add last line
+                        if current_pos < len(latex_clean):
+                            line_content = latex_clean[current_pos:].strip()
+                            if line_content:
+                                label = self._extract_equation_label(line_content)
+                                if label:
+                                    line_content = re.sub(r'^\([^)]+\)\s*', '', line_content).strip()
+                                lines.append({
+                                    "latex": line_content,
+                                    "label": label
+                                })
         
-        return lines
+        # Limit to 5 lines maximum as requested
+        if len(lines) > 5:
+            # Limit to 5 lines maximum as requested
+            if len(lines) > 5:
+                logger.warning("Equation has %d lines, limiting to first 5 lines", len(lines))
+                lines = lines[:5]
+            
+            return lines
+
+    def _is_multiline_equation(self, latex: str) -> bool:
+        """
+        Detect if LaTeX is a multiline equation.
+        ENHANCED: Now detects ALL types including literal newlines.
+        """
+        # Standard multiline environments
+        multiline_envs = ['align', 'aligned', 'eqnarray', 'gather', 'multline', 'split']
+        for env in multiline_envs:
+            if f'\\begin{{{env}' in latex:
+                return True
+        
+        # Check for \\ line breaks (but not \\command)
+        # Pattern: \\ followed by non-letter or end of string
+        if re.search(r'\\\\(?![a-zA-Z])', latex):
+            return True
+        
+        # Check for \cr line breaks
+        if r'\cr' in latex:
+            return True
+        
+        # ENHANCED: Check for literal newlines WITHIN the latex (not just wrapping)
+        # If there are 2+ lines AND they contain math operators, likely multiline
+        lines = latex.split('\n')
+        if len(lines) >= 2:
+            # Count how many lines have math content (not just whitespace/labels)
+            math_lines = [line for line in lines if line.strip() and any(c in line for c in ['=', '+', '-', '\\', '{', '}'])]
+            if len(math_lines) >= 2:
+                logger.info(f"[Multiline] Detected {len(math_lines)} lines with math content (literal newlines)")
+                return True
+        
+        return False
 
     def _is_matrix_equation(self, latex: str) -> bool:
         """Detect if LaTeX contains a matrix equation."""
@@ -810,6 +1669,40 @@ class LatexToMathML:
         if re.search(r'\\begin\s*\{array\}', latex, re.IGNORECASE):
             return True
         
+        # CRITICAL: Detect bracket-based matrices (e.g., [a b] = [c d])
+        # Pattern: something = [content] where content suggests multiple rows/columns
+        bracket_matrix_pattern = r'\[([^\]]+)\]\s*=\s*\[([^\]]+)\]'
+        bracket_match = re.search(bracket_matrix_pattern, latex)
+        if bracket_match:
+            left_content = bracket_match.group(1)
+            right_content = bracket_match.group(2)
+            
+            # Check if right side has multiple elements that suggest a matrix
+            # Count summation operators, subscripts, or other math elements
+            # If there are 4+ elements (suggesting 2x2 matrix), treat as matrix
+            right_elements = re.findall(r'\\sum|\\prod|\\int|\w+_\{\w+\}|\w+\^\{\w+\}', right_content)
+            if len(right_elements) >= 4:
+                logger.debug("Detected bracket-based matrix equation with %d elements", len(right_elements))
+                return True
+            
+            # Also check if content has explicit row separators (\\)
+            if "\\\\" in right_content or "\\cr" in right_content:
+                return True
+        
+        # Check for multiple bracket pairs that suggest matrix structure
+        # Pattern: [row1] = [row1_content] followed by [row2] = [row2_content]
+        multiple_brackets = re.findall(r'\[[^\]]+\]', latex)
+        if len(multiple_brackets) >= 2:
+            # Check if brackets are on separate lines or have matrix-like structure
+            bracket_positions = [m.start() for m in re.finditer(r'\[[^\]]+\]', latex)]
+            if len(bracket_positions) >= 2:
+                # Check spacing between brackets (if they're close, might be matrix)
+                for i in range(len(bracket_positions) - 1):
+                    gap = bracket_positions[i+1] - bracket_positions[i]
+                    # If brackets are reasonably spaced and content suggests matrix, treat as matrix
+                    if 50 < gap < 500:  # Reasonable gap for matrix rows
+                        return True
+        
         return False
 
     def _convert_matrix_equation(self, latex: str) -> str:
@@ -823,6 +1716,8 @@ class LatexToMathML:
                 re.DOTALL | re.IGNORECASE
             )
             trailing_after_matrix = ""
+            matrix_content = None  # Initialize to None
+            skip_parsing = False  # Flag to skip re-parsing if we already parsed
             
             if not matrix_match:
                 # Try with \left[ \begin{array} ... \end{array} \right]
@@ -847,15 +1742,106 @@ class LatexToMathML:
                     matrix_part = matrix_match.group(1)
                     trailing_after_matrix = latex[matrix_match.end():].strip()
                 else:
-                    # No matrix found, try direct conversion (might be malformed)
-                    logger.warning("Matrix pattern detected but couldn't extract matrix content, trying direct conversion")
-                    return self._convert_single_line(latex)
+                    # CRITICAL: Try bracket-based matrix detection (e.g., [T_{1,1} T_{1,2}] = [sum ... sum ...])
+                    bracket_matrix_match = re.search(
+                        r'^(.+?)\s*=\s*\[([^\]]+)\]',
+                        latex,
+                        re.DOTALL
+                    )
+                    if bracket_matrix_match:
+                        var_part = bracket_matrix_match.group(1).strip()
+                        var_part = re.sub(r'\s*=\s*$', '', var_part).strip()
+                        right_content = bracket_matrix_match.group(2).strip()
+                        
+                        # Check if right content has multiple elements suggesting a matrix
+                        # Count summation operators or other repeating patterns
+                        sum_count = right_content.count('\\sum') + right_content.count('\\prod')
+                        if sum_count >= 4:
+                            # Likely a 2x2 matrix - split into rows
+                            logger.info("Detected bracket-based matrix with %d summation operators, attempting 2x2 structure", sum_count)
+                            
+                            # Try splitting by counting sums - each sum typically represents a cell
+                            sum_positions = []
+                            for match in re.finditer(r'\\sum', right_content):
+                                sum_positions.append(match.start())
+                            
+                            if len(sum_positions) == 4:
+                                # Split into 4 cells based on sum positions
+                                # Find boundaries between sums (look for end of previous sum expression)
+                                cells = []
+                                
+                                # Method: Find where each sum expression ends
+                                # A sum expression typically ends before the next sum or at end of string
+                                for i in range(len(sum_positions)):
+                                    start = sum_positions[i]
+                                    if i < len(sum_positions) - 1:
+                                        # Find the end of this sum expression (before next sum)
+                                        # Look for patterns like: sum ... x_i (end of cell)
+                                        end = sum_positions[i+1]
+                                        # Try to find a better boundary (e.g., after x_i or similar)
+                                        cell_content = right_content[start:end].strip()
+                                        cells.append(cell_content)
+                                    else:
+                                        # Last cell
+                                        cell_content = right_content[start:].strip()
+                                        cells.append(cell_content)
+                                
+                                if len(cells) == 4:
+                                    # Organize into 2x2 matrix
+                                    matrix_content = [
+                                        [cells[0], cells[1]],
+                                        [cells[2], cells[3]]
+                                    ]
+                                    
+                                    # Also check left side - might have matrix structure too
+                                    left_bracket_match = re.search(r'\[([^\]]+)\]', var_part)
+                                    if left_bracket_match:
+                                        left_content = left_bracket_match.group(1).strip()
+                                        var_part = var_part[:left_bracket_match.start()].strip()
+                                    
+                                    # Convert to proper matrix LaTeX format for processing
+                                    matrix_part = "\\begin{array}{cc} " + " & ".join(cells[0:2]) + " \\\\ " + " & ".join(cells[2:4]) + " \\end{array}"
+                                    logger.info("Converted bracket matrix to array format with 2x2 structure")
+                                    
+                                    # Set flag to skip re-parsing since we already have matrix_content
+                                    skip_parsing = True
+                                    # Continue to process this matrix_content below
+                                else:
+                                    logger.warning("Failed to split bracket matrix into 4 cells")
+                                    return self._convert_single_line(latex)
+                            else:
+                                # Not exactly 4 sums - try alternative parsing
+                                logger.warning("Bracket matrix has %d sums, not 4. Trying alternative parsing.", len(sum_positions))
+                                # Fall back to treating as single-line for now
+                                return self._convert_single_line(latex)
+                        else:
+                            # Not enough elements to be a matrix
+                            return self._convert_single_line(latex)
+                    else:
+                        # No matrix found, try direct conversion (might be malformed)
+                        logger.warning("Matrix pattern detected but couldn't extract matrix content, trying direct conversion")
+                        return self._convert_single_line(latex)
             else:
                 var_part = matrix_match.group(1).strip()
                 # Remove trailing = if present
                 var_part = re.sub(r'\s*=\s*$', '', var_part).strip()
-                matrix_part = matrix_match.group(2)
+                
+                # CRITICAL: If var_part has an unclosed \left\{ or similar, move it to matrix_part
+                # Example: \mathbf{D} = { \left\{ \begin{array} ...
+                if var_part.endswith(r'\left\{') or var_part.endswith(r'{ \left\{'):
+                    move_match = re.search(r'(\{?\s*\\left\\\{\s*)$', var_part)
+                    if move_match:
+                        to_move = move_match.group(1)
+                        var_part = var_part[:-len(to_move)].strip()
+                        matrix_part = to_move + matrix_match.group(2)
+                else:
+                    matrix_part = matrix_match.group(2)
+                
                 trailing_after_matrix = latex[matrix_match.end():].strip()
+                # Remove trailing } if we moved a corresponding {
+                if matrix_part.startswith('{') and trailing_after_matrix.endswith('}'):
+                    matrix_part = matrix_part + "}"
+                    trailing_after_matrix = trailing_after_matrix[:-1].strip()
             
             # If no variable part (standalone matrix), create empty variable
             if not var_part:
@@ -885,6 +1871,15 @@ class LatexToMathML:
             elif "Vmatrix" in matrix_part:
                 bracket_open = "‖"
                 bracket_close = "‖"
+            elif r"\left\{" in matrix_part or r"\left\{" in latex:
+                bracket_open = "{"
+                bracket_close = "}"
+            elif r"\left(" in matrix_part:
+                bracket_open = "("
+                bracket_close = ")"
+            elif r"\left|" in matrix_part:
+                bracket_open = "|"
+                bracket_close = "|"
             elif "array" in matrix_part and "\\left[" not in matrix_part:
                 # Standalone array without brackets - use square brackets by default
                 bracket_open = "["
@@ -900,8 +1895,10 @@ class LatexToMathML:
             if brace_diff > 0 and brace_diff <= 3:
                 matrix_part = matrix_part + "}" * brace_diff
 
-            # Parse matrix content
-            matrix_content = self._parse_matrix_content(matrix_part)
+            # Parse matrix content (unless we already parsed it for bracket-based matrices)
+            if not skip_parsing:
+                matrix_content = self._parse_matrix_content(matrix_part)
+            # else: matrix_content is already set from bracket-based parsing above
 
             # Append trailing text (after the matrix) to the last row cell so we don't lose content
             if trailing_after_matrix:
@@ -1444,13 +2441,24 @@ class LatexToMathML:
         # Collapse repeated \displaystyle tokens
         normalized = re.sub(r'(\\displaystyle\s*){2,}', lambda m: r'\displaystyle ', normalized)
 
-        # Remove outer double braces around simple content (non-command or a single command)
-        # Example: {{\displaystyle X}} -> {\displaystyle X}
-        if normalized.startswith("{{") and normalized.endswith("}}"):
-            inner = normalized[2:-2]
-            # Only strip one level if it looks like an over-wrapped token
-            if inner and inner.count("{") == inner.count("}"):
-                normalized = inner if inner.startswith("\\") else "{" + inner + "}"
+        # Remove outer braces if they wrap the entire expression and are balanced
+        # Example: {\left\{ ... \right\}} -> \left\{ ... \right\}
+        # Example: {{\displaystyle X}} -> \displaystyle X
+        while normalized.startswith("{") and normalized.endswith("}"):
+            inner = normalized[1:-1].strip()
+            # Ensure braces are balanced in the inner part
+            depth = 0
+            balanced = True
+            for ch in inner:
+                if ch == "{": depth += 1
+                elif ch == "}": depth -= 1
+                if depth < 0:
+                    balanced = False
+                    break
+            if balanced and depth == 0:
+                normalized = inner
+            else:
+                break
 
         # Sanitize delimiter noise: \left. / \right. often appear and break parsing
         normalized = re.sub(r'\\left\.', '', normalized)
@@ -1760,6 +2768,106 @@ class LatexToMathML:
             error_msg = f"{type(exc).__name__}: {str(exc)}"
             raise ValueError(f"LaTeX→MathML conversion failed: {error_msg}. LaTeX: {latex[:200]}")
 
+    def _ensure_block_display(self, mathml: str) -> str:
+        """Ensure the math tag has display="block" attribute."""
+        if not mathml or '<math' not in mathml:
+            return mathml
+            
+        if 'display=' not in mathml:
+            return mathml.replace('<math', '<math display="block"', 1)
+        return mathml
+
+    def _ensure_namespace(self, mathml: str) -> str:
+        """Ensure proper xmlns and mml prefix if needed."""
+        # Delegate to post_processor if available, otherwise simple fix
+        if hasattr(self, 'post_processor'):
+            return self.post_processor.ensure_namespace(mathml)
+            
+        if 'xmlns=' not in mathml and '<math' in mathml:
+             return mathml.replace('<math', '<math xmlns="http://www.w3.org/1998/Math/MathML"', 1)
+        return mathml
+
+    def _extract_label(self, latex: str) -> Tuple[Optional[str], str]:
+        """
+        Extract equation labels like \\tag{...} or (1.2) from the end of the string.
+        Returns (label, clean_latex).
+        """
+        if not latex:
+            return None, latex
+            
+        # 1. Check for \\tag{...}
+        tag_match = re.search(r'\\tag\{((?:[^{}]|\\{|\\})*)\}', latex)
+        if tag_match:
+            label = tag_match.group(1)
+            # Remove the tag from latex
+            clean_latex = latex[:tag_match.start()] + latex[tag_match.end():]
+            return label.strip(), clean_latex.strip()
+
+        # 2. Check for (number) at the end of string
+        # Careful not to match (a+b)
+        # We look for (digits.digits) or (digits) at the very end
+        label_match = re.search(r'\s*\((\d+(?:\.\d+)?)\)\s*$', latex)
+        if label_match:
+            label = label_match.group(1)
+            clean_latex = latex[:label_match.start()]
+            return label.strip(), clean_latex.strip()
+            
+        return None, latex
+
+    def _attach_label(self, mathml: str, label: str) -> str:
+        """
+        Attach an equation label to the MathML.
+        Creates an <mtable> structure if needed.
+        """
+        if not mathml or '<math' not in mathml:
+            return mathml
+            
+        try:
+            # Parse XML
+            root = ET.fromstring(mathml)
+            
+            # We want to wrap the content in a table with the label on the right
+            # <mtable width="100%"><mtr><mtd>{content}</mtd><mtd>(label)</mtd></mtr></mtable>
+            # But standard MathML doesn't support "width=100%" cleanly in all renderers.
+            # We'll generate a simple structure.
+            
+            ns = "{http://www.w3.org/1998/Math/MathML}"
+            
+            # Create new root mtable
+            new_root = ET.Element(f"{ns}math" if root.tag.startswith(ns) else "math")
+            if 'display' in root.attrib:
+                new_root.set('display', root.attrib['display'])
+            else:
+                new_root.set('display', 'block')
+                
+            mtable = ET.SubElement(new_root, f"{ns}mtable" if root.tag.startswith(ns) else "mtable")
+            # Set simpler attributes
+            mtable.set('columnalign', 'center right')
+            
+            mtr = ET.SubElement(mtable, f"{ns}mtr" if root.tag.startswith(ns) else "mtr")
+            
+            # Content cell
+            mtd_content = ET.SubElement(mtr, f"{ns}mtd" if root.tag.startswith(ns) else "mtd")
+            
+            # Copy all children of original root to mtd_content
+            # If original root was math, its children are the expression
+            for child in root:
+                mtd_content.append(child)
+                
+            # Label cell
+            mtd_label = ET.SubElement(mtr, f"{ns}mtd" if root.tag.startswith(ns) else "mtd")
+            # Add padding
+            mtd_label.set('style', 'padding-left: 2em;') 
+            
+            mtext = ET.SubElement(mtd_label, f"{ns}mtext" if root.tag.startswith(ns) else "mtext")
+            mtext.text = f"({label})"
+            
+            return ET.tostring(new_root, encoding="unicode", method="xml")
+            
+        except Exception as e:
+            logger.warning(f"Failed to attach label: {e}")
+            return mathml
+
     def _fallback_text_mathml(self, text: str) -> str:
         """
         DEPRECATED: This method creates invalid MathML (LaTeX in <mtext>).
@@ -1790,778 +2898,45 @@ class LatexToMathML:
             f'</math>'
         )
 
-
-# """Convert LaTeX to MathML."""
-# from __future__ import annotations
-
-# import re
-# import xml.etree.ElementTree as ET
-
-# from latex2mathml.converter import convert as latex2mathml_convert
-
-# from core.logger import logger
-
-# # Import entity utilities for proper HTML entity handling in MathML
-# try:
-#     from utils.html_entity_utils import (
-#         decode_html_entities,
-#         normalize_mathml_entities,
-#         escape_for_mathml,
-#     )
-#     ENTITY_UTILS_AVAILABLE = True
-# except ImportError:
-#     # Fallback if entity utilities not available
-#     ENTITY_UTILS_AVAILABLE = False
-#     logger.warning("HTML entity utilities not available - using basic XML escaping")
-
-# # Avoid ns0 prefixes by registering the default MathML namespace up front
-# ET.register_namespace("", "http://www.w3.org/1998/Math/MathML")
-
-
-# class LatexToMathML:
-#     """Service converting LaTeX strings to MathML with Mathpix-like formatting."""
-
-#     def convert(self, latex: str) -> str:
-#         """Convert LaTeX to MathML with proper structure like Mathpix."""
-#         logger.info("Converting LaTeX to MathML")
-#         if not latex:
-#             raise ValueError("Empty LaTeX string")
+    def _openai_latex_to_mathml(self, latex: str) -> str:
+        """
+        Use OpenAI GPT-4 to convert LaTeX to MathML.
         
-#         # STEP 0: Check for corrupted LaTeX patterns and apply canonical reconstruction
-#         # This ensures we never convert corrupted LaTeX to MathML
-#         # Store original for logging
-#         original_latex = latex
-#         latex = self._ensure_canonical_latex(latex)
-#         latex = self._repair_common_ocr_errors(latex)
-#         if latex != original_latex:
-#             # Safely encode Unicode for logging (avoid encoding errors)
-#             try:
-#                 original_safe = original_latex[:80].encode('ascii', 'replace').decode('ascii')
-#                 latex_safe = latex[:80].encode('ascii', 'replace').decode('ascii')
-#                 logger.info("LaTeX was reconstructed: %s -> %s", original_safe, latex_safe)
-#             except Exception:  # noqa: BLE001
-#                 logger.info("LaTeX was reconstructed (Unicode in string)")
-        
-#         # Check if it's plain text wrapped in \text{} - don't convert to MathML
-#         if latex.startswith("\\text{") and latex.endswith("}"):
-#             # It's plain text, create simple MathML for text
-#             text_content = latex[6:-1]  # Remove \text{ and }
-#             # Unescape LaTeX special characters
-#             text_content = text_content.replace("\\{", "{")
-#             text_content = text_content.replace("\\}", "}")
-#             text_content = text_content.replace("\\textbackslash", "\\")
-#             text_content = text_content.replace("\\$", "$")
-#             text_content = text_content.replace("\\&", "&")
-#             text_content = text_content.replace("\\%", "%")
-#             text_content = text_content.replace("\\#", "#")
-#             text_content = text_content.replace("\\textasciicircum", "^")
-#             text_content = text_content.replace("\\_", "_")
+        This is a fallback for complex multiline equations that latex2mathml cannot handle.
+        """
+        try:
+            # Phase 2: Use the robust OCR-specific converter
+            from services.ocr.openai_mathml_converter import OpenAIMathMLConverter
             
-#             # Decode any HTML entities in text content, then escape for XML
-#             if ENTITY_UTILS_AVAILABLE:
-#                 text_content = decode_html_entities(text_content)
-#                 text_content = escape_for_mathml(text_content)
-#             else:
-#                 # Basic XML escaping
-#                 text_content = text_content.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            # Use gpt-4o-mini for speed and cost-effectiveness (semantic repair)
+            converter = OpenAIMathMLConverter(model="gpt-4o-mini")
             
-#             # Return simple MathML for text
-#             return f'<math xmlns="http://www.w3.org/1998/Math/MathML"><mtext>{text_content}</mtext></math>'
-        
-#         # Check if it's just a simple identifier in $...$
-#         if latex.startswith("$") and latex.endswith("$") and len(latex) > 2:
-#             inner = latex[1:-1].strip()
-#             # If it's just alphanumeric, treat as identifier
-#             if inner.replace("_", "").replace("^", "").isalnum():
-#                 return f'<math xmlns="http://www.w3.org/1998/Math/MathML"><mi>{inner}</mi></math>'
-        
-#         # Try to convert actual LaTeX
-#         try:
-#             # Remove $ delimiters if present for conversion
-#             latex_clean = latex.strip()
-#             if latex_clean.startswith("$") and latex_clean.endswith("$"):
-#                 latex_clean = latex_clean[1:-1]
+            # The new converter returns a dict with 'mathml', 'latex', 'confidence'
+            result = converter.convert_latex_to_mathml(latex)
             
-#             # Detect equation labels like "(2.1)", "(2.2)", etc. - also handle at end with comma
-#             equation_label = None
-#             # Pattern: (2.1) or (2.1), at the end, possibly with text before it
-#             label_patterns = [
-#                 r',\s*\((\d+\.\d+)\)\s*$',  # Comma before label at end: ", (2.1)"
-#                 r'\s+\((\d+\.\d+)\)\s*$',   # Space before label at end: " (2.1)"
-#                 r'\((\d+\.\d+)\)',          # Anywhere: "(2.1)"
-#             ]
-#             for pattern in label_patterns:
-#                 label_match = re.search(pattern, latex_clean)
-#                 if label_match:
-#                     equation_label = label_match.group(1)
-#                     # Remove label from LaTeX for conversion
-#                     latex_clean = re.sub(pattern, '', latex_clean).strip()
-#                     # Clean up trailing commas and spaces
-#                     latex_clean = re.sub(r',\s*$', '', latex_clean).strip()
-#                     break
+            mathml = result.get("mathml", "")
             
-#             # Sanitize LaTeX before conversion
-#             latex_clean = latex_clean.replace("\n", " ").replace("\r", " ")
-#             latex_clean = " ".join(latex_clean.split())  # Normalize whitespace
+            if not mathml or not mathml.strip():
+                logger.warning("OpenAI returned empty MathML")
+                return ""
             
-#             # Convert LaTeX to MathML
-#             result = latex2mathml_convert(latex_clean)
-
-#             # Check for corrupted MathML patterns and attempt repair
-#             if self._is_corrupted_mathml(result, latex_clean):
-#                 logger.warning("Detected potentially corrupted MathML, attempting repair...")
-#                 repaired_mathml, repaired_latex = self._repair_with_reconstructor(latex_clean)
-#                 if repaired_mathml and not self._is_corrupted_mathml(repaired_mathml, repaired_latex or latex_clean):
-#                     result = repaired_mathml
-#                     latex_clean = repaired_latex or latex_clean
-#                     logger.info("MathML repaired successfully")
+            # Validate that it's actually MathML
+            if '<math' not in mathml:
+                logger.warning("OpenAI did not return valid MathML")
+                return ""
             
-#             # If the converter fell back to plain text (<mtext>) try one repair pass:
-#             # rebuild LaTeX with the dynamic reconstructor and re-convert.
-#             if "<mtext>" in result:
-#                 repaired_mathml, repaired_latex = self._repair_with_reconstructor(latex_clean)
-#                 if repaired_mathml:
-#                     result = repaired_mathml
-#                     latex_clean = repaired_latex or latex_clean
-
-#             # Post-process to add Mathpix-like structure
-#             result = self._enhance_mathml(result, equation_label)
+            # Additional validation: ensure no LaTeX commands leaked into MathML
+            if re.search(r'<mtext>.*\\[a-zA-Z]+\{', mathml):
+                logger.warning("OpenAI MathML contains LaTeX in <mtext> - cleaning")
+                mathml = self._clean_invalid_mathml(mathml)
             
-#             # Normalize HTML entities in MathML for proper rendering
-#             if ENTITY_UTILS_AVAILABLE:
-#                 result = normalize_mathml_entities(result)
+            return mathml
             
-#             logger.debug("Converted LaTeX to MathML: %s -> %s", latex[:50], result[:100] if result else "EMPTY")
-#             return result
-#         except (ValueError, SyntaxError) as exc:
-#             # These are parsing errors from latex2mathml
-#             logger.warning("LaTeX parsing failed (invalid syntax): %s. LaTeX: %s", exc, latex[:100])
-#             # Try a single repair with the dynamic reconstructor before falling back
-#             latex_source = " ".join(latex.replace("\n", " ").split())
-#             repaired_mathml, repaired_latex = self._repair_with_reconstructor(latex_source)
-#             if repaired_mathml:
-#                 logger.info("MathML rebuilt after initial parse failure")
-#                 return self._enhance_mathml(repaired_mathml, locals().get("equation_label"))
-#             # Fallback: return text as MathML
-#             text_content = latex.replace("$", "").strip()
-#             # Decode HTML entities if present, then escape for XML
-#             if ENTITY_UTILS_AVAILABLE:
-#                 text_content = decode_html_entities(text_content)
-#                 text_content = escape_for_mathml(text_content)
-#             else:
-#                 # Basic XML escaping
-#                 text_content = text_content.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-#             return f'<math xmlns="http://www.w3.org/1998/Math/MathML"><mtext>{text_content}</mtext></math>'
-#         except re.error as exc:
-#             # Regex pattern errors (like "missing < at position 2")
-#             logger.warning("LaTeX regex pattern error: %s. LaTeX: %s", exc, latex[:100])
-#             # Fallback: return text as MathML
-#             text_content = latex.replace("$", "").strip()
-#             # Decode HTML entities if present, then escape for XML
-#             if ENTITY_UTILS_AVAILABLE:
-#                 text_content = decode_html_entities(text_content)
-#                 text_content = escape_for_mathml(text_content)
-#             else:
-#                 # Basic XML escaping
-#                 text_content = text_content.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-#             return f'<math xmlns="http://www.w3.org/1998/Math/MathML"><mtext>{text_content}</mtext></math>'
-#         except Exception as exc:  # noqa: BLE001
-#             # Catch all other errors (including PatternError from latex2mathml internals)
-#             error_msg = str(exc)
-#             if "missing" in error_msg.lower() and "position" in error_msg.lower():
-#                 # This is a regex pattern error from latex2mathml
-#                 logger.warning("LaTeX regex pattern error (from latex2mathml): %s. LaTeX: %s", exc, latex[:100])
-#             else:
-#                 logger.exception("Unexpected conversion error: %s. LaTeX: %s", exc, latex[:100])
-#             # Fallback: return text as MathML
-#             text_content = latex.replace("$", "").strip()
-#             # Decode HTML entities if present, then escape for XML
-#             if ENTITY_UTILS_AVAILABLE:
-#                 text_content = decode_html_entities(text_content)
-#                 text_content = escape_for_mathml(text_content)
-#             else:
-#                 # Basic XML escaping
-#                 text_content = text_content.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-#             return f'<math xmlns="http://www.w3.org/1998/Math/MathML"><mtext>{text_content}</mtext></math>'
-    
-#     def _ensure_canonical_latex(self, latex: str) -> str:
-#         """Ensure LaTeX is canonical before MathML conversion.
-        
-#         Detects corrupted LaTeX patterns (like \\f_r a_c, \\s_u m, \\l_e f_t) and
-#         applies canonical reconstruction if the target equation is detected.
-        
-#         Args:
-#             latex: Potentially corrupted LaTeX string
-            
-#         Returns:
-#             Clean canonical LaTeX if equation detected, otherwise original LaTeX
-#         """
-#         # Check if LaTeX contains corrupted patterns that indicate the target equation
-#         # Patterns like: \f_r a_c (corrupted \frac), \s_u m (corrupted \sum), etc.
-#         corrupted_patterns = [
-#             r'\\f\s*_\s*\{?r\}?\s*a\s*_\s*\{?c\}?',  # \f_r a_c (corrupted \frac)
-#             r'\\f\s*_\s*\{r\}\s*a\s*_\s*\{c\}',  # \f_{r}a_{c} (with braces)
-#             r'\\s\s*_\s*\{?u\}?\s*m',  # \s_u m (corrupted \sum)
-#             r'\\s\s*_\s*\{u\}\s*m',  # \s_{u}m (with braces)
-#             r'\\l\s*_\s*\{?e\}?\s*f\s*_\s*\{?t\}?',  # \l_e f_t (corrupted \left)
-#             r'\\l\s*_\s*\{e\}\s*f\s*_\s*\{t\}',  # \l_{e}f_{t} (with braces)
-#             r'c1n',  # c1n (corrupted \frac{1}{n})
-#         ]
-        
-#         has_corrupted_pattern = any(re.search(pattern, latex, re.IGNORECASE) for pattern in corrupted_patterns)
-        
-#         # Also check for the specific patterns with direct string matching (faster and more reliable)
-#         # These are the exact patterns we see in errors
-#         direct_checks = [
-#             r'\f_{r}',  # \f_{r}
-#             r'\f_{r}a_{c}',  # \f_{r}a_{c}
-#             r'\f_r',  # \f_r
-#             r'\s_{u}',  # \s_{u}
-#             r'\s_u',  # \s_u
-#             r'\l_{e}',  # \l_{e}
-#             r'\l_e',  # \l_e
-#         ]
-#         if any(check in latex for check in direct_checks):
-#             has_corrupted_pattern = True
-        
-#         if has_corrupted_pattern:
-#             # Safely encode Unicode for logging
-#             try:
-#                 latex_safe = latex[:100].encode('ascii', 'replace').decode('ascii')
-#                 logger.info("Detected corrupted LaTeX patterns, applying canonical reconstruction. LaTeX: %s", latex_safe)
-#             except Exception:  # noqa: BLE001
-#                 logger.info("Detected corrupted LaTeX patterns, applying canonical reconstruction")
-#             try:
-#                 # Use dynamic reconstructor (works for any formula)
-#                 from services.ocr.dynamic_latex_reconstructor import DynamicLaTeXReconstructor
-#                 reconstructor = DynamicLaTeXReconstructor()
-#                 reconstructed = reconstructor.reconstruct(latex)
-#                 if reconstructed and reconstructed != latex:
-#                     logger.info("Dynamic reconstruction applied before MathML conversion")
-#                     return reconstructed
-#             except ImportError:
-#                 # Fallback to old reconstructor if dynamic one not available
-#                 try:
-#                     from services.ocr.latex_reconstructor import LaTeXReconstructor
-#                     reconstructor = LaTeXReconstructor()
-#                     canonical = reconstructor._canonical_reconstruction(latex)
-#                     if canonical:
-#                         logger.info("Canonical reconstruction applied before MathML conversion")
-#                         return canonical
-#                     reconstructed = reconstructor.reconstruct(latex)
-#                     if reconstructed and reconstructed != latex:
-#                         logger.info("Full reconstruction applied before MathML conversion")
-#                         return reconstructed
-#                 except Exception as exc:  # noqa: BLE001
-#                     logger.warning("Reconstruction failed during MathML conversion: %s", exc)
-#             except Exception as exc:  # noqa: BLE001
-#                 logger.warning("Dynamic reconstruction failed during MathML conversion: %s", exc)
-        
-#         return latex
+        except ImportError:
+            logger.error("OpenAIMathMLConverter not available - cannot use AI fallback")
+            return ""
+        except Exception as e:
+            logger.error("OpenAI MathML conversion failed: %s", e)
+            return ""
 
-#     def _repair_common_ocr_errors(self, latex: str) -> str:
-#         r"""Repair frequent OCR corruptions for math expressions before conversion.
-
-#         Comprehensive OCR repair system that handles:
-        
-#         1. **Special Characters**: Unicode garbage, currency symbols, punctuation variants
-#         2. **Greek Letters**: All Greek letters (α-ω, Α-Ω) mapped to LaTeX commands
-#         3. **Mathematical Operators**: Set operations (∪, ∩, ∈), relations (≤, ≥, ≠), 
-#            calculus (∑, ∫, ∂), logic (∧, ∨, →), and more
-#         4. **LaTeX Command Corruptions**: Expanded patterns for \sum, \prod, \frac, 
-#            \left/\right, \ldots, \sqrt, \int, \partial, \nabla, \infty, etc.
-#         5. **Equation Templates**: Channel equations, probability-of-error, power constraints
-#         6. **Noise Removal**: Stray digits, punctuation, parentheticals, trailing fragments
-        
-#         Targets patterns seen in diagram extractions where LaTeX is wrapped in <mtext>
-#         and contains broken commands like \\s_{u}m, \\l_{d}o_{t}s, stray \\left, etc.
-#         """
-#         import re
-
-#         repaired = latex
-
-#         # Basic garbage character cleanup (smart quotes, copyright, question marks)
-#         garbage_map = {
-#             "“": "",
-#             "”": "",
-#             "‘": "",
-#             "’": "",
-#             "©": "",
-#             "©": "",
-#             "�": "",
-#             "?": "",
-#         }
-#         for bad, good in garbage_map.items():
-#             repaired = repaired.replace(bad, good)
-
-#         # ===== COMPREHENSIVE SPECIAL CHARACTER MAPPINGS =====
-        
-#         # Greek letters: common OCR misreadings -> LaTeX
-#         greek_map = {
-#             "α": r"\alpha", "β": r"\beta", "γ": r"\gamma", "δ": r"\delta", "Δ": r"\Delta",
-#             "ε": r"\epsilon", "θ": r"\theta", "Θ": r"\Theta", "λ": r"\lambda", "Λ": r"\Lambda",
-#             "μ": r"\mu", "π": r"\pi", "Π": r"\Pi", "σ": r"\sigma", "Σ": r"\Sigma",
-#             "φ": r"\phi", "Φ": r"\Phi", "ω": r"\omega", "Ω": r"\Omega",
-#             "η": r"\eta", "ι": r"\iota", "κ": r"\kappa", "ν": r"\nu",
-#             "ξ": r"\xi", "Ξ": r"\Xi", "ρ": r"\rho", "τ": r"\tau",
-#             "υ": r"\upsilon", "Υ": r"\Upsilon", "χ": r"\chi", "ψ": r"\psi", "Ψ": r"\Psi", "ζ": r"\zeta",
-#         }
-#         for bad, good in greek_map.items():
-#             repaired = repaired.replace(bad, good)
-
-#         # Mathematical operators and symbols: OCR variants -> LaTeX
-#         operator_map = {
-#             "∪": r"\cup", "∩": r"\cap", "∈": r"\in", "∉": r"\notin",
-#             "⊂": r"\subset", "⊃": r"\supset", "⊆": r"\subseteq", "⊇": r"\supseteq", "∅": r"\emptyset",
-#             "≤": r"\leq", "≥": r"\geq", "≠": r"\neq", "≈": r"\approx",
-#             "≡": r"\equiv", "≅": r"\cong", "∼": r"\sim", "∝": r"\propto",
-#             "×": r"\times", "÷": r"\div", "±": r"\pm", "∓": r"\mp",
-#             "⋅": r"\cdot", "∗": r"\ast",
-#             "∑": r"\sum", "∏": r"\prod", "∫": r"\int", "∂": r"\partial",
-#             "∇": r"\nabla", "∞": r"\infty",
-#             "∧": r"\land", "∨": r"\lor", "¬": r"\neg",
-#             "→": r"\to", "←": r"\leftarrow", "↔": r"\leftrightarrow",
-#             "⇒": r"\Rightarrow", "⇐": r"\Leftarrow", "⇔": r"\Leftrightarrow",
-#             "√": r"\sqrt", "∛": r"\sqrt[3]", "∜": r"\sqrt[4]",
-#             "∠": r"\angle", "′": r"'", "″": r"''",
-#             "ℵ": r"\aleph", "℘": r"\wp", "ℜ": r"\Re", "ℑ": r"\Im", "℧": r"\mho",
-#         }
-#         for bad, good in operator_map.items():
-#             repaired = repaired.replace(bad, good)
-
-#         # Probability-of-error template detection and snap to canonical
-#         lowered_for_prob = repaired.lower()
-#         prob_cues = [
-#             "p_error",
-#             "perror",
-#             "p_e",
-#             r"\p_r",
-#             "pr[",
-#             "pr(",
-#             "pr{",
-#             r"\cup",
-#             "⋃",
-#             "!=",
-#             "≠",
-#             "g_{i}",
-#             "y_{a}",
-#             "y_{d}",
-#             "i=1",
-#         ]
-#         prob_hits = sum(1 for cue in prob_cues if cue in lowered_for_prob)
-#         if prob_hits >= 3:
-#             return self.PROB_ERROR_CANONICAL
-
-#         # Expanded LaTeX command corruptions
-#         expanded_latex_fixes = [
-#             (r"\\s\s*u\s*m\b", r"\\sum"),  # sum without underscores
-#             (r"\\p\s*r\s*o\s*d\b", r"\\prod"),  # prod without underscores
-#             (r"\\f\s*r\s*a\s*c\b", r"\\frac"),  # frac without underscores
-#             (r"\\s\s*q\s*r\s*t\b", r"\\sqrt"),  # sqrt variants
-#             (r"\\i\s*n\s*t\b", r"\\int"),  # int variants
-#             (r"\\p\s*a\s*r\s*t\s*i\s*a\s*l\b", r"\\partial"),  # partial variants
-#             (r"\\n\s*a\s*b\s*l\s*a\b", r"\\nabla"),  # nabla variants
-#             (r"\\i\s*n\s*f\s*t\s*y\b", r"\\infty"),  # infty variants
-#         ]
-#         for pattern, replacement in expanded_latex_fixes:
-#             repaired = re.sub(pattern, replacement, repaired, flags=re.IGNORECASE)
-
-#         # Detect the canonical power constraint shape and directly snap to the canonical LaTeX
-#         # Pattern cues: r_v, y_0, y_{t-1}, sum-like corruption, fraction 1/n, power 2, and a trailing P
-#         lowered = repaired.lower().replace(" ", "")
-#         canonical_cues = [
-#             "rv", "y0", "t-1",  # variables
-#         ]
-#         has_cues = all(cue in lowered for cue in canonical_cues)
-#         has_sum_like = any(token in lowered for token in ("\\sum", "s_u", "s_{u}", "sum"))
-#         has_frac_like = "1n" in lowered or "\\frac" in lowered or "frac{1}{n}" in lowered
-#         has_power2 = "]^2" in repaired or "}^{2}" in repaired or "^{2}" in repaired
-#         if has_cues and has_sum_like and has_frac_like and has_power2:
-#             return (
-#                 r"\frac{1}{n}\sum_{t=0}^{n-1}\left[ r_v^{(t)}\left( y_{0}, \ldots, y_{t-1} \right) \right]^2 \le P"
-#             )
-
-#         # Detect noisy channel equation and snap to canonical
-#         channel_cues = [
-#             "y_",
-#             "x_",
-#             "z_",
-#             "l]",
-#             "l_{e}",
-#             "l_{d}",
-#             "l_{l}",
-#             "[e]",
-#             "hag",
-#             "so ",
-#             "ss",
-#             "sp",
-#             "s_p",
-#             "251",
-#         ]
-#         channel_hits = sum(1 for cue in channel_cues if cue in lowered)
-#         if channel_hits >= 3:
-#             return self.CHANNEL_CANONICAL
-
-#         # Fix corrupted \sum variants: \s_{u}m, \s_u m, etc.
-#         repaired = re.sub(r"\\s\s*_\s*\{?u\}?\s*m", r"\\sum", repaired, flags=re.IGNORECASE)
-        
-#         # Fix corrupted \bigcup: b_{i}g_{c}u_{p} -> \bigcup
-#         repaired = re.sub(r"b\s*_\s*\{?i\}?\s*g\s*_\s*\{?c\}?\s*u\s*_\s*\{?p\}?", r"\\bigcup", repaired, flags=re.IGNORECASE)
-        
-#         # Fix corrupted \neq: n_{e}q -> \neq
-#         repaired = re.sub(r"n\s*_\s*\{?e\}?\s*q\b", r"\\neq", repaired, flags=re.IGNORECASE)
-        
-#         # Fix escaped backslashes in commands (\\left -> \left, but preserve actual escaped backslashes)
-#         # Only fix if it's a known command pattern
-#         repaired = re.sub(r"\\\\(left|right|bigcup|sum|frac|neq|mathrm|mathbb|mathcal)", r"\\\1", repaired)
-
-#         # Fix corrupted \ldots variants: \l_{d}o_{t}s
-#         repaired = re.sub(r"\\l\s*_\s*\{?d\}?\s*o\s*_\s*\{?t\}?\s*s", r"\\ldots", repaired, flags=re.IGNORECASE)
-
-#         # Normalize stray single-letter backslashes like \P or \U
-#         repaired = re.sub(r"\\P\b", "P", repaired)
-#         repaired = re.sub(r"\\U\b", r"\\cup", repaired)
-
-#         # Fix corrupted \left / \right that were split into individual letters
-#         repaired = re.sub(r"\\l\s*_\s*\{?e\}?\s*f\s*_\s*\{?t\}?", r"\\left", repaired, flags=re.IGNORECASE)
-#         repaired = re.sub(r"\\l\s*e\s*f\s*t", r"\\left", repaired, flags=re.IGNORECASE)
-#         repaired = re.sub(r"\\r\s*_\s*\{?i\}?\s*g\s*_\s*\{?h\}?\s*t", r"\\right", repaired, flags=re.IGNORECASE)
-#         repaired = re.sub(r"\\r\s*i\s*g\s*h\s*t", r"\\right", repaired, flags=re.IGNORECASE)
-
-#         # Collapse duplicated fence modifiers (\\left\\left -> \\left)
-#         repaired = re.sub(r"\\left\\left", r"\\left", repaired)
-#         repaired = re.sub(r"\\right\\right", r"\\right", repaired)
-        
-#         # Fix letter-by-letter subscript patterns (e.g., m_{a}t_{h}r_{m} -> \mathrm{math})
-#         # This handles OCR corruption where words are split into individual letter subscripts
-#         def collapse_letter_by_letter_pattern(match: re.Match) -> str:
-#             r"""Collapse letter-by-letter subscript sequences into \mathrm{word}."""
-#             seq = match.group(1)
-#             # Extract letter-subscript pairs
-#             pairs = re.findall(r'([a-zA-Z])_\{([a-zA-Z])\}', seq)
-#             if not pairs:
-#                 return seq
-            
-#             base_letters = ''.join(a for a, b in pairs)
-#             sub_letters = ''.join(b for a, b in pairs)
-#             candidate = base_letters + sub_letters
-            
-#             # If candidate forms a plausible word (length >= 3), replace with \mathrm
-#             if len(candidate) >= 3:
-#                 return r"\mathrm{" + candidate + r"}"
-#             return seq
-        
-#         # Find and collapse letter-by-letter patterns (2+ consecutive letter-subscript pairs)
-#         letter_pattern = re.compile(r'((?:[a-zA-Z]_\{[a-zA-Z]\}){2,})')
-#         repaired = letter_pattern.sub(collapse_letter_by_letter_pattern, repaired)
-        
-#         # Also handle patterns where the word is in subscripts (e.g., P_{m_{a}t_{h}r_{m}})
-#         # This handles cases like P_error where "error" is corrupted as m_{a}t_{h}r_{m}
-#         # Pattern: P_{m_{a}t_{h}r_{m}} -> P_{\mathrm{math}}
-#         # Note: This pattern matches the closing brace, so it handles complete subscript groups
-#         subscript_word_pattern = re.compile(r'([A-Za-z])_\{((?:[a-zA-Z]_\{[a-zA-Z]\}){2,})\}')
-#         def fix_subscript_word(match: re.Match) -> str:
-#             """Fix subscript words that are letter-by-letter."""
-#             base = match.group(1)
-#             subscript_seq = match.group(2)
-#             pairs = re.findall(r'([a-zA-Z])_\{([a-zA-Z])\}', subscript_seq)
-#             if pairs:
-#                 base_letters = ''.join(a for a, b in pairs)
-#                 sub_letters = ''.join(b for a, b in pairs)
-#                 candidate = base_letters + sub_letters
-#                 if len(candidate) >= 3:
-#                     return f"{base}_{{\\mathrm{{{candidate}}}}}}}"
-#             return match.group(0)
-#         repaired = subscript_word_pattern.sub(fix_subscript_word, repaired)
-        
-#         # Fix empty bracket patterns: [ ] -> [0] or remove if context suggests
-#         repaired = re.sub(r'\[\s*\]', r'[0]', repaired)
-        
-#         # Fix patterns like Y_{d_{i}}[ ] -> Y_{d_i}[0]
-#         # This handles cases where subscripts are nested but valid, but brackets are empty
-#         repaired = re.sub(r'(\w+)_\{(\w+)_\{(\w+)\}\}\[\s*\]', r'\1_{\2_\3}[0]', repaired)
-
-#         # Convert stray single-letter backslashed tokens (e.g., \P_r) to plain letters
-#         repaired = re.sub(r"\\([A-Za-z])\s*_\s*\{?([A-Za-z0-9]+)\}?", r"\1_{\2}", repaired)
-#         repaired = re.sub(r"\\([A-Za-z])\b", r"\1", repaired)
-
-#         # Resolve double-underscore patterns that trigger DoubleSubscriptsError
-#         # Examples: "_ -" -> "-", "_," -> ",", "_ )" -> ")"
-#         repaired = re.sub(r"_\s*([-+*/=),])", r"\1", repaired)
-#         # Remove repeated underscores in a row
-#         repaired = re.sub(r"__+", r"_", repaired)
-
-#         # Drop obvious punctuation noise like stray semicolons/colons between symbols
-#         repaired = re.sub(r"(?<=\b[A-Za-z0-9}_])\s*[;:]+\s*", " ", repaired)
-
-#         # Remove isolated digits between identifiers (e.g., W_{i} 4 g_{i} -> W_{i} g_{i})
-#         repaired = re.sub(r"(?<=\b[A-Za-z}_])\s+\d+\s+(?=[A-Za-z\\])", " ", repaired)
-
-#         # Channel equation OCR cleanup: l_{e}] / l_{d}] / l_{l}] or [e] -> [t]
-#         repaired = re.sub(r"l\s*_\s*\{?e\}?\s*\]", r"[t]", repaired, flags=re.IGNORECASE)
-#         repaired = re.sub(r"l\s*_\s*\{?d\}?\s*\]", r"[t]", repaired, flags=re.IGNORECASE)
-#         repaired = re.sub(r"l\s*_\s*\{?l\}?\s*\]", r"[t]", repaired, flags=re.IGNORECASE)
-#         repaired = re.sub(r"\[\s*e\s*\]", r"[t]", repaired, flags=re.IGNORECASE)
-#         repaired = re.sub(r"y\s*\]", r"[t]", repaired, flags=re.IGNORECASE)
-#         repaired = re.sub(r"l\]", r"[t]", repaired, flags=re.IGNORECASE)
-#         # Drop stray semicolons/commas near brackets
-#         repaired = re.sub(r";\s*\[", "[", repaired)
-#         # Remove trailing noise like "4T (7" or standalone "(7"
-#         repaired = re.sub(r"\b\d+\s*T\s*\(\d+\)", "", repaired)
-#         repaired = re.sub(r"\(\d+\)\s*$", "", repaired)
-#         repaired = re.sub(r"#\s*\d+\s*\(\d+\)", "", repaired)
-#         repaired = re.sub(r"\b\d+\s*d\)", "", repaired)
-
-#         # General noise for non-channel OCR: remove "(R:" fragments and trailing i=l
-#         repaired = re.sub(r"\(R\s*[:;]\s*", "R ", repaired, flags=re.IGNORECASE)
-#         repaired = re.sub(r"\(\s*R\b", "R ", repaired, flags=re.IGNORECASE)
-#         repaired = re.sub(r"\bi\s*=\s*l\b", "", repaired, flags=re.IGNORECASE)
-#         # Drop parenthetical R_* blocks and stray integers/questions
-#         repaired = re.sub(r"\(R[^)]*\)", " ", repaired, flags=re.IGNORECASE)
-#         repaired = re.sub(r"\b\d+\b", " ", repaired)
-#         repaired = re.sub(r"\s+n\s+", " ", repaired)
-#         repaired = repaired.replace("?", "")
-
-#         # Fix corrupted \left ... \right pairs that degraded to "\left P" (should be \le P or plain P)
-#         repaired = re.sub(r"\\left\s+P", r"\\le P", repaired, flags=re.IGNORECASE)
-
-#         # Remove lone \left or \right without companions to avoid parser errors
-#         # If there's a \left[...] without \right, drop the modifier but keep the bracket
-#         repaired = re.sub(r"\\left\s*(\(|\[|\{)", r"\1", repaired)
-#         repaired = re.sub(r"\\right\s*(\)|\]|\})", r"\1", repaired)
-
-#         # Balance obvious missing closing brackets if the structure suggests [ ... ]^2
-#         # If we have \left[ ... ]^2 without \right], replace trailing "]" with "\right]"
-#         repaired = re.sub(r"\\left\[\s*(.*?)\s\]", r"\\left[ \1 \\right]", repaired)
-
-#         # Normalize commas between arguments inside parentheses if corrupted spacing removed them
-#         repaired = re.sub(r"\(\s*([a-zA-Z0-9_]+)\s+\\ldots\s+([a-zA-Z0-9_]+)\s*\)", r"( \1, \\ldots, \2 )", repaired)
-
-#         return repaired
-
-#     # --- Probability-of-error template detection/repair ---
-
-#     PROB_ERROR_CANONICAL = (
-#         r"P_{\text{error}}(C)=\Pr\!\left[\bigcup_{i=1}^{K}"
-#         r"\left\{W_i \ne g_i\!\left(Y_{d_i}[0],\,\ldots,\,Y_{d_i}[n-1]\right)\right\}\right]"
-#     )
-
-#     CHANNEL_CANONICAL = (
-#         r"Y_{j}[t]=\sum_{i\in I(j)} h_{i,j}[t] X_{i}[t] + Z_{j}[t]"
-#     )
-
-#     def detect_probability_of_error(self, latex: str) -> dict | None:
-#         """Detect and repair probability-of-error equations from corrupted OCR.
-
-#         Returns JSON-like dict per template when detected, else None.
-#         """
-#         normalized = latex.lower()
-#         cues = [
-#             "p_error",
-#             "perr",
-#             "p_e",
-#             r"\p_r",
-#             "pr[",
-#             "pr(",
-#             "pr{",
-#             "⋃",
-#             r"\cup",
-#             "!=",
-#             "≠",
-#             "w_i",
-#             "g_i",
-#             "y_{d",
-#             "y_a",
-#         ]
-#         cue_hits = sum(1 for c in cues if c in normalized)
-#         if cue_hits == 0:
-#             return None
-
-#         fixed = latex
-#         substitutions = [
-#             (r"\\?P\s*r\s*\[", r"Pr["),
-#             (r"\\?P\s*r\s*\(", r"Pr("),
-#             (r"\\?P\s*r\s*\{", r"Pr{"),
-#             (r"\\P_r", r"Pr"),
-#             (r"left\s*\{", r"{"),
-#             (r"l\s*e\s*f\s*t\s*\{", r"{"),
-#             (r"right\s*\}", r"}"),
-#             (r"r\s*i\s*g\s*h\s*t\s*\}", r"}"),
-#             (r"W[\s;,_]+i", r"W_i"),
-#             (r"W\s*;\s*i", r"W_i"),
-#             (r"g[\s;,_]+i\s*\(", r"g_i("),
-#             (r"Y\s*a", r"Y_{d_i}"),
-#             (r"Y_{a}", r"Y_{d_i}"),
-#             (r"Y\:\s*a", r"Y_{d_i}"),
-#             (r"#", r""),
-#             (r";", r","),
-#         ]
-#         for pattern, repl in substitutions:
-#             fixed = re.sub(pattern, repl, fixed, flags=re.IGNORECASE)
-
-#         # Ensure union and inequality present
-#         if r"\cup" not in fixed and "⋃" not in fixed:
-#             fixed = fixed.replace(r"\left\{", r"\cup \left\{", 1) if r"\left\{" in fixed else r"\cup " + fixed
-#         if r"\ne" not in fixed and "!=" in fixed:
-#             fixed = fixed.replace("!=", r"\ne")
-#         if r"\ne" not in fixed and r"\neq" not in fixed:
-#             fixed = fixed.replace("=", r"\ne", 1) if "=" in fixed else fixed + r" \ne "
-
-#         fixed_latex = self.PROB_ERROR_CANONICAL
-#         confidence = min(1.0, 0.5 + 0.05 * cue_hits)
-#         return {
-#             "fixed_latex": fixed_latex,
-#             "detected_template": "probability_of_error",
-#             "confidence": round(confidence, 2),
-#             "explanation": "OCR repaired and matched probability-of-error template.",
-#         }
-
-#     def _repair_with_reconstructor(self, latex_source: str) -> tuple[str | None, str | None]:
-#         """Try to repair corrupted LaTeX using the dynamic reconstructor.
-
-#         Returns a tuple of (mathml, repaired_latex). mathml is None when no repair succeeded.
-#         """
-#         try:
-#             math_tokens = ("\\frac", "\\sum", "\\left", "\\right", "^", "_", "\\le", "\\ge", "\\cdot", "\\ldots")
-#             if not any(token in latex_source for token in math_tokens):
-#                 return None, None
-
-#             from services.ocr.dynamic_latex_reconstructor import DynamicLaTeXReconstructor
-
-#             reconstructor = DynamicLaTeXReconstructor()
-#             repaired_latex = reconstructor.reconstruct(latex_source)
-#             if repaired_latex and repaired_latex != latex_source:
-#                 repaired_mathml = latex2mathml_convert(repaired_latex)
-#                 return repaired_mathml, repaired_latex
-#         except Exception as exc:  # noqa: BLE001
-#             logger.debug("Repair pass failed: %s", exc)
-
-#         return None, None
-    
-#     def _is_corrupted_mathml(self, mathml: str, original_latex: str) -> bool:
-#         """Detect if MathML appears corrupted based on common corruption patterns.
-        
-#         Checks for:
-#         - Missing opening brackets (e.g., Y_i] instead of Y_i[t])
-#         - Garbled subscripts (e.g., D_Ohigl instead of sum)
-#         - Suspicious operator sequences
-#         - Structural inconsistencies
-#         """
-#         if not mathml or not original_latex:
-#             return False
-        
-#         # Check for common corruption patterns
-#         corruption_patterns = [
-#             # Missing opening brackets
-#             r'<mo stretchy="false">\]</mo>',  # Closing bracket without opening
-#             # Garbled subscripts (like D_Ohigl, gigl_xs_ie)
-#             r'<mi>[D-Z]</mi>.*?<msub>.*?<mi>[O-Z]</mi>',  # Suspicious capital letter subscripts
-#             # Suspicious operator sequences
-#             r'<mo stretchy="false">\)</mo>\s*<mo>,</mo>',  # Closing paren followed by comma
-#             r'<mo stretchy="false">\(</mo>\s*<mo stretchy="false">\)</mo>',  # Empty parentheses
-#         ]
-        
-#         for pattern in corruption_patterns:
-#             if re.search(pattern, mathml):
-#                 return True
-        
-#         # Check if MathML structure doesn't match LaTeX intent
-#         # If LaTeX has sum but MathML doesn't
-#         if r'\sum' in original_latex and '<mo>∑</mo>' not in mathml and 'sum' not in mathml.lower():
-#             # Check if there are suspicious capital letters that might be corrupted sum
-#             if re.search(r'<mi>[D-Z]</mi>.*?<msub>', mathml):
-#                 return True
-        
-#         # Check for missing opening brackets when LaTeX has brackets
-#         if '[' in original_latex and ']' in original_latex:
-#             # Count brackets in LaTeX
-#             open_brackets = original_latex.count('[')
-#             close_brackets = original_latex.count(']')
-#             # Count in MathML (approximate - looking for bracket operators)
-#             mathml_open = mathml.count('<mo stretchy="false">[</mo>') + mathml.count('<mo>[</mo>')
-#             mathml_close = mathml.count('<mo stretchy="false">]</mo>') + mathml.count('<mo>]</mo>')
-            
-#             # If we have closing brackets but significantly fewer opening brackets
-#             if mathml_close > 0 and mathml_open < mathml_close - 1:
-#                 return True
-        
-#         return False
-    
-#     def _enhance_mathml(self, mathml: str, equation_label: str | None = None) -> str:
-#         """Enhance MathML to match Mathpix format with display block and equation labels.
-        
-#         Produces format like:
-#         <math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
-#           <mtable displaystyle="true">
-#             <mlabeledtr>
-#               <mtd id="mjx-eqn:2.1">
-#                 <mtext>(2.1)</mtext>
-#               </mtd>
-#               <mtd>
-#                 <!-- formula content -->
-#               </mtd>
-#             </mlabeledtr>
-#           </mtable>
-#         </math>
-#         """
-#         try:
-#             # Parse the MathML
-#             root = ET.fromstring(mathml)
-            
-#             # Add display="block" attribute to math element
-#             root.set("display", "block")
-            
-#             # If there's an equation label, wrap in mtable with mlabeledtr
-#             if equation_label:
-#                 # Create mtable structure like Mathpix
-#                 mtable = ET.Element("mtable", displaystyle="true")
-#                 mlabeledtr = ET.SubElement(mtable, "mlabeledtr")
-                
-#                 # Add label cell with proper ID
-#                 mtd_label = ET.SubElement(mlabeledtr, "mtd", id=f"mjx-eqn:{equation_label}")
-#                 mtext_label = ET.SubElement(mtd_label, "mtext")
-#                 mtext_label.text = f"({equation_label})"
-                
-#                 # Add equation content cell
-#                 mtd_content = ET.SubElement(mlabeledtr, "mtd")
-                
-#                 # Move all children from root to mtd_content
-#                 for child in list(root):
-#                     mtd_content.append(child)
-                
-#                 # Replace root's children with mtable
-#                 root.clear()
-#                 root.append(mtable)
-            
-#             # Convert back to string with proper formatting
-#             try:
-#                 ET.indent(root, space="  ")  # Python 3.9+
-#             except AttributeError:
-#                 pass  # Older Python versions - no indent method
-            
-#             # Generate XML string with proper formatting
-#             mathml_str = ET.tostring(root, encoding="unicode", method="xml")
-            
-#             # Ensure proper namespace (always add it)
-#             if 'xmlns="http://www.w3.org/1998/Math/MathML"' not in mathml_str:
-#                 mathml_str = mathml_str.replace('<math', '<math xmlns="http://www.w3.org/1998/Math/MathML"')
-            
-#             # Normalize HTML entities in the final MathML
-#             if ENTITY_UTILS_AVAILABLE:
-#                 mathml_str = normalize_mathml_entities(mathml_str)
-            
-#             return mathml_str
-            
-#         except ET.ParseError as exc:
-#             logger.warning("Failed to parse MathML for enhancement: %s", exc)
-#             # Return original with display="block" added manually
-#             if 'display="block"' not in mathml:
-#                 mathml = mathml.replace('<math', '<math display="block"')
-#             return mathml
-#         except Exception as exc:  # noqa: BLE001
-#             logger.warning("Failed to enhance MathML: %s", exc)
-#             # Return original with display="block" added manually
-#             if 'display="block"' not in mathml:
-#                 mathml = mathml.replace('<math', '<math display="block"')
-#             return mathml
 

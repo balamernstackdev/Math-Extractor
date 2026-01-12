@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import os
+import re
 import json
 from typing import Dict, Optional, List
 from core.logger import logger
@@ -63,94 +64,74 @@ class OpenAIMathMLConverter:
         self.model = model
         self.timeout = timeout
         
-        # Initialize OpenAI client
-        # FIX: Create explicit httpx client to avoid 'proxies' parameter issue
-        # The OpenAI library's internal httpx client tries to read proxies from env vars
-        # and pass them through, but newer versions don't accept 'proxies' as a parameter
-        # Solution: Create our own httpx client explicitly without proxies
+        # --- ROBUST PROXY HANDLING ---
+        # Issue: Recent 'httpx' versions (>0.25.0) removed the 'proxies' argument.
+        # Older 'openai' versions (or mismatched environments) may try to pass 'proxies' to httpx.
+        # Solution: Define a SafeHttpxClient that swallows the 'proxies' argument if passed.
         
+        if httpx:
+            class SafeHttpxClient(httpx.Client):
+                """Httpx client that safely ignores the 'proxies' argument."""
+                def __init__(self, *args, **kwargs):
+                    # Aggressively remove 'proxies' and 'proxy' if present
+                    kwargs.pop('proxies', None)
+                    kwargs.pop('proxy', None)
+                    
+                    try:
+                        super().__init__(*args, **kwargs)
+                    except TypeError as e:
+                        # If it still fails with unexpected keyword arguments, 
+                        # try to identify and remove them
+                        error_msg = str(e)
+                        if "unexpected keyword argument" in error_msg:
+                            import re
+                            match = re.search(r"unexpected keyword argument '([^']+)'", error_msg)
+                            if match:
+                                arg_name = match.group(1)
+                                logger.warning(f"SafeHttpxClient: Swallowing unexpected argument: {arg_name}")
+                                kwargs.pop(arg_name, None)
+                                # Retry recursively once
+                                try:
+                                    super().__init__(*args, **kwargs)
+                                    return
+                                except Exception:
+                                    pass
+                        
+                        # Fallback: init with ONLY timeout if everything else fails
+                        logger.warning(f"SafeHttpxClient: Final fallback for {e}")
+                        safe_kwargs = {}
+                        if 'timeout' in kwargs: safe_kwargs['timeout'] = kwargs['timeout']
+                        super().__init__(**safe_kwargs)
+
+            # Use our safe client
+            self._http_client = SafeHttpxClient(timeout=float(timeout))
+        else:
+            self._http_client = None
+
         # Build base kwargs
         client_kwargs: dict = {
-            "api_key": self.api_key
+            "api_key": self.api_key,
         }
         
-        # Add base_url if provided (for Azure OpenAI or custom endpoints)
+        if self._http_client:
+            client_kwargs["http_client"] = self._http_client
+        
         if base_url:
             client_kwargs["base_url"] = base_url
-        
-        # Create explicit httpx client to avoid proxy issues
-        # The OpenAI library's internal SyncHttpxClientWrapper tries to read proxies from env vars
-        # and pass them through, but newer httpx versions don't accept 'proxies' as a parameter
-        # Solution: Temporarily unset proxy env vars BEFORE creating httpx client
-        httpx_timeout = timeout if timeout and timeout > 0 else 30.0
-        
-        # CRITICAL: Save and unset ALL proxy environment variables BEFORE any httpx/OpenAI code runs
-        # This must happen before httpx.Client() is called, as it reads env vars at creation time
-        proxy_env_vars = {}
-        proxy_keys = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']
-        for key in proxy_keys:
-            if key in os.environ:
-                proxy_env_vars[key] = os.environ.pop(key)
-        
-        try:
-            if httpx is not None:
-                # Create httpx client AFTER unsetting proxy env vars
-                # This ensures httpx doesn't read proxy settings from environment
-                # Note: We don't pass proxies parameter at all - newer httpx versions don't accept it
-                http_client = httpx.Client(
-                    timeout=httpx_timeout,
-                    # Explicitly don't pass proxies - let it be None/empty
-                )
-                client_kwargs["http_client"] = http_client
             
-            # Now create OpenAI client (proxy env vars are unset, so SyncHttpxClientWrapper won't find them)
-            # The OpenAI library will use our http_client, but if it tries to create SyncHttpxClientWrapper,
-            # it won't find proxy env vars to pass through
+        try:
             self.client = OpenAI(**client_kwargs)
             logger.info(f"OpenAI MathML converter initialized (model: {model})")
         except TypeError as e:
-            error_str = str(e).lower()
-            if "proxies" in error_str:
-                # If proxies error still occurs, try with a custom httpx client that explicitly ignores proxies
-                logger.warning(f"Proxies error detected, trying alternative approach: {e}")
-                client_kwargs.pop("http_client", None)
-                
-                # Try creating httpx client with explicit proxy configuration
-                if httpx is not None:
-                    try:
-                        # Create client with empty proxy config
-                        http_client = httpx.Client(
-                            timeout=httpx_timeout,
-                            # Try to explicitly set proxies to empty dict if supported
-                        )
-                        # Try to disable proxy detection by setting env to empty
-                        client_kwargs["http_client"] = http_client
-                        self.client = OpenAI(**client_kwargs)
-                        logger.info(f"OpenAI MathML converter initialized (model: {model}, alternative config)")
-                    except Exception:
-                        # Last resort: try without http_client
-                        client_kwargs.pop("http_client", None)
-                        self.client = OpenAI(**client_kwargs)
-                        logger.info(f"OpenAI MathML converter initialized (model: {model}, minimal config)")
-                else:
-                    self.client = OpenAI(**client_kwargs)
-                    logger.info(f"OpenAI MathML converter initialized (model: {model}, minimal config)")
-            else:
-                raise
-        except Exception as e:
-            # Fallback: try without explicit http_client if there's an issue
-            logger.warning(f"Failed to create OpenAI client, trying fallback: {e}")
+            # If it still fails with 'proxies' or similar, try bare minimum
+            logger.warning(f"Failed to init OpenAI with custom client ({e}), retrying with minimal config...")
             client_kwargs.pop("http_client", None)
             try:
                 self.client = OpenAI(**client_kwargs)
-                logger.info(f"OpenAI MathML converter initialized (model: {model}, fallback config)")
-            except Exception as e2:
-                logger.error(f"Failed to initialize OpenAI client: {e2}")
+                logger.info("OpenAI initialized with minimal config")
+            except Exception as final_e:
+                logger.error(f"Critical OpenAI init failure: {final_e}")
                 raise
-        finally:
-            # Restore proxy environment variables
-            for key, value in proxy_env_vars.items():
-                os.environ[key] = value
     
     def convert_corrupted_mathml(
         self,
@@ -194,7 +175,7 @@ class OpenAIMathMLConverter:
                         "content": prompt
                     }
                 ],
-                temperature=0.1,  # Low temperature for consistent output
+                temperature=0.0,  # Zero temperature for deterministic output
                 max_tokens=3000  # Increased for complex equations
             )
             
@@ -373,7 +354,7 @@ class OpenAIMathMLConverter:
                         "content": prompt
                     }
                 ],
-                temperature=0.1,
+                temperature=0.0,
                 max_tokens=3000  # Increased for complex equations
             )
             
@@ -426,7 +407,11 @@ YOUR TASK:
 OUTPUT FORMAT:
 Return JSON ONLY - no markdown, no explanations, no prose.
 JSON format: {"mathml": "...", "latex": "...", "confidence": 0.0-1.0}
-CRITICAL: Output MUST be valid JSON that can be parsed with json.loads()"""
+CRITICAL: Output MUST be valid JSON that can be parsed with json.loads()
+IMPORTANT JSON RULES:
+- ESCAPE ALL BACKSLASHES: Use "\\\\" for every single backslash. Example: "\\\\frac{{a}}{{b}}" NOT "\\frac{{a}}{{b}}"
+- Single backslash "\\" inside a string is INVALID JSON. You must double it: "\\\\"
+"""
         
         return """You are a Math Extraction & Validation Agent specialized in converting mathematical equations to clean LaTeX and proper Presentation MathML.
 
@@ -448,6 +433,10 @@ OUTPUT FORMAT:
 Return JSON ONLY - no markdown, no explanations, no prose.
 JSON format: {"mathml": "...", "latex": "...", "confidence": 0.0-1.0}
 CRITICAL: Output MUST be valid JSON that can be parsed with json.loads()
+IMPORTANT JSON RULES:
+- ESCAPE ALL BACKSLASHES: Use "\\\\" for every single backslash. Example: "\\\\frac{{a}}{{b}}" NOT "\\frac{{a}}{{b}}"
+- Single backslash "\\" inside a string is INVALID JSON. You must double it: "\\\\"
+- Escape quotes: \\"
 
 MathML Requirements:
 - Use proper namespace: xmlns="http://www.w3.org/1998/Math/MathML" display="inline" or display="block"
@@ -507,6 +496,10 @@ OUTPUT FORMAT (MANDATORY - JSON ONLY):
 Return JSON ONLY - no markdown, no explanations, no prose.
 JSON format: {{"mathml": "...", {"latex": "...", " if include_latex else ""}"confidence": 0.0-1.0}}
 CRITICAL: Output MUST be valid JSON that can be parsed with json.loads()
+IMPORTANT JSON RULES:
+- ESCAPE ALL BACKSLASHES: Use "\\\\" for every single backslash. Example: "\\\\frac{{a}}{{b}}" NOT "\\frac{{a}}{{b}}"
+- Single backslash "\\" inside a string is INVALID JSON. You must double it: "\\\\"
+- Escape quotes: \\"
 NO MARKDOWN CODE BLOCKS, NO EXPLANATIONS, NO PROSE - ONLY JSON
 
 MathML Requirements:
@@ -712,6 +705,30 @@ Return as JSON with keys: mathml, latex, confidence"""
                     raise
                 
         except (json.JSONDecodeError, ValueError, AttributeError) as e:
+            # Attempt to repair JSON with unescaped backslashes (common in LaTeX)
+            # OpenAI often outputs "\mathbf" instead of "\\mathbf" in JSON strings
+            if isinstance(e, json.JSONDecodeError):
+                log.append(f"JSON decode error: {e}. Attempting to repair unescaped backslashes...")
+                try:
+                    # Heuristic: Replace backslashes that aren't part of valid JSON escapes
+                    # Valid escapes: \" \\ \/ \b \f \n \r \t \uXXXX
+                    # We want to escape all other backslashes, e.g. \m -> \\m, \l -> \\l
+                    
+                    # Strategy:
+                    # 1. Use raw string manipulation carefully
+                    # This regex matches a backslash that is NOT followed by valid escape chars
+                    # We look for \ followed by anything NOT in " \ / b f n r t u
+                    # But verifying \uXXXX is hard with simple regex.
+                    # Simpler strategy: Use a custom repair function
+                    
+                    repaired_content = self._repair_json_string(content)
+                    if repaired_content != content:
+                        result = json.loads(repaired_content)
+                        log.append("Successfully repaired JSON backslashes")
+                        return result
+                except Exception as repair_err:
+                    log.append(f"JSON repair failed: {repair_err}")
+            
             log.append(f"Failed to parse JSON: {e}")
             log.append("CRITICAL: OpenAI violated JSON-only requirement - response contains markdown/prose")
             logger.warning(f"Could not parse AI response as JSON: {content[:200]}")
@@ -723,6 +740,42 @@ Return as JSON with keys: mathml, latex, confidence"""
                 f"OpenAI response is not valid JSON (violates JSON-only requirement). "
                 f"Response starts with: {content[:100]}"
             )
+
+    def _repair_json_string(self, json_str: str) -> str:
+        """
+        Attempt to repair common JSON syntax errors in LaTeX content.
+        Mainly fixes unescaped backslashes (e.g. "\alpha" -> "\\alpha").
+        """
+        # Finds backslashes that are followed by a character that makes it an invalid escape
+        # Valid JSON escapes: " \ / b f n r t u
+        # We want to catch things like \a, \c, \d, \e, ... \z (except b, f, n, r, t, u)
+        # Also symbols like \{, \}, \|, etc.
+        
+        # Pattern: \ followed by a character that IS NOT one of ["\/bfnrtu]
+        # We need to escape these invalid backslashes => \\
+        
+        # However, we must ignore \\ (already escaped backslash)
+        # So we look for an odd number of backslashes followed by invalid char?
+        # Simpler: replace `\` with `\\` everywhere, then fix double-escaped valid sequences? 
+        # No, that's messy.
+        
+        # Robust Regex approach:
+        # Match a backslash that is:
+        # 1. Not preceded by a backslash (negative lookbehind) -> (?<!\\)
+        # 2. Not followed by a valid escape char -> (?![\\"/bfnrtu])
+        # This covers \a, \c, \left, \mathbf, etc.
+        
+        # Note: escaping " is complex because \" is valid, but what about \\" ? 
+        # (escaping a backslash then a quote).
+        # This simple regex handles standard LaTeX macros like \mathbf well enough.
+        
+        # Regex explanation:
+        # (?<!\\) : Not preceded by backslash
+        # \\ : The literal backslash to match
+        # (?![\\"/bfnrtu]) : Not followed by valid JSON escape character
+        
+        repaired = re.sub(r'(?<!\\)\\(?![\\"/bfnrtu])', r'\\\\', json_str)
+        return repaired
 
 
 # Convenience function for easy integration

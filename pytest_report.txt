@@ -1,0 +1,576 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.13.7, pytest-8.3.3, pluggy-1.6.0
+rootdir: D:\test-r&d\mathpix_clone
+plugins: anyio-4.12.0, cov-7.0.0
+collected 200 items
+
+tests\test_ast_pipeline.py ...........                                   [  5%]
+tests\test_cache_fix.py .                                                [  6%]
+tests\test_latex_parser.py ........                                      [ 10%]
+tests\test_math_expression_pipeline.py ......F.F.                        [ 15%]
+tests\test_multiline_fixes.py FF....FF                                   [ 19%]
+tests\test_ocr.py F                                                      [ 19%]
+tests\test_ocr_cleaner.py FFFFFFFFFFFFFF.                                [ 27%]
+tests\test_ocr_pipeline.py FFFFF.FFFFFFFFF                               [ 34%]
+tests\test_pdf.py .                                                      [ 35%]
+tests\test_structure_algorithms.py .                                     [ 35%]
+tests\test_xml.py .                                                      [ 36%]
+tests\unit\test_latex_validation.py .FFF....FF.F...F....FF.FF.F.         [ 50%]
+tests\unit\test_mathml_validation.py .F.FFFF.F.FF...F.FFFFF...FFF.F      [ 65%]
+tests\unit\test_multiline_conversion.py .........FFFF.FF.                [ 73%]
+tests\unit\test_multiline_detection.py FFFFFFFFFFFFFFFFFF                [ 82%]
+tests\unit\test_multiline_validation_rules.py ..........F.F.....         [ 91%]
+examples\test_corruption_gate.py .                                       [ 92%]
+examples\test_gatekeeper.py .                                            [ 92%]
+examples\test_mandatory_pipeline.py .                                    [ 93%]
+examples\test_production_grade.py .                                      [ 93%]
+examples\test_required_format.py .                                       [ 94%]
+examples\test_semantic_correctness.py .                                  [ 94%]
+examples\test_semantic_validation.py .                                   [ 95%]
+examples\test_strict_pipeline.py .                                       [ 95%]
+test_cases.py .                                                          [ 96%]
+test_l2m.py .                                                            [ 96%]
+test_l2m_aligned.py .                                                    [ 97%]
+test_l2m_cases.py .                                                      [ 97%]
+test_l2m_v2.py .                                                         [ 98%]
+test_multiline.py .                                                      [ 98%]
+test_multiline_v2.py .                                                   [ 99%]
+test_visual.py .                                                         [ 99%]
+test_visual_v2.py .                                                      [100%]
+
+================================== FAILURES ===================================
+____________________________ test_latex_processing ____________________________
+tests\test_math_expression_pipeline.py:95: in test_latex_processing
+    result = pipeline.ingest(latex)
+services\ocr\pipeline.py:456: in ingest
+    ai_result = self._try_openai_conversion(clean_latex)
+services\ocr\pipeline.py:303: in _try_openai_conversion
+    if not self.openai_key:
+E   AttributeError: 'MathExpressionPipeline' object has no attribute 'openai_key'
+______________ test_mathml_conversion_failure_returns_safe_math _______________
+tests\test_math_expression_pipeline.py:126: in test_mathml_conversion_failure_returns_safe_math
+    result = pipeline.ingest(r"\frac{1}{n}")
+services\ocr\pipeline.py:456: in ingest
+    ai_result = self._try_openai_conversion(clean_latex)
+services\ocr\pipeline.py:303: in _try_openai_conversion
+    if not self.openai_key:
+E   AttributeError: 'MathExpressionPipeline' object has no attribute 'openai_key'
+------------------------------ Captured log call ------------------------------
+ERROR    mathpix_clone:pipeline.py:229 [PIPELINE] latexΓåÆMathML conversion failed: Conversion failed
+_______________ TestMultilineFixes.test_undefined_variable_fix ________________
+tests\test_multiline_fixes.py:25: in test_undefined_variable_fix
+    assert len(result) == 3
+E   TypeError: object of type 'NoneType' has no len()
+__________________ TestMultilineFixes.test_latex_validation ___________________
+tests\test_multiline_fixes.py:39: in test_latex_validation
+    assert not valid, "Unbalanced braces not detected"
+E   AssertionError: Unbalanced braces not detected
+E   assert not True
+---------------------------- Captured stdout call -----------------------------
+Γ£ô Valid LaTeX accepted
+________________ TestMultilineFixes.test_line_parsing_accuracy ________________
+tests\test_multiline_fixes.py:111: in test_line_parsing_accuracy
+    assert len(lines) == 3, f"Expected 3 lines, got {len(lines)}"
+E   TypeError: object of type 'NoneType' has no len()
+___________________ TestMultilineFixes.test_max_lines_limit ___________________
+tests\test_multiline_fixes.py:124: in test_max_lines_limit
+    assert len(lines) <= 5, f"Lines not limited to 5: got {len(lines)}"
+E   TypeError: object of type 'NoneType' has no len()
+------------------------------ Captured log call ------------------------------
+WARNING  mathpix_clone:latex_to_mathml.py:1537 Equation has more than 5 lines (7 total). Processing first 5 lines only.
+_________________________ test_latex_to_mathml_empty __________________________
+tests\test_ocr.py:13: in test_latex_to_mathml_empty
+    with pytest.raises(ValueError):
+E   Failed: DID NOT RAISE <class 'ValueError'>
+______________ TestOCRMathMLCleaner.test_remove_stray_characters ______________
+tests\test_ocr_cleaner.py:17: in test_remove_stray_characters
+    result = cleaner._remove_stray_chars(corrupted)
+E   AttributeError: 'OCRMathMLCleaner' object has no attribute '_remove_stray_chars'
+_________________ TestOCRMathMLCleaner.test_fix_ocr_patterns __________________
+tests\test_ocr_cleaner.py:30: in test_fix_ocr_patterns
+    result = cleaner._fix_ocr_patterns(text)
+E   AttributeError: 'OCRMathMLCleaner' object has no attribute '_fix_ocr_patterns'
+_______________ TestOCRMathMLCleaner.test_remove_empty_elements _______________
+tests\test_ocr_cleaner.py:45: in test_remove_empty_elements
+    cleaner._remove_empty_elements(root)
+E   AttributeError: 'OCRMathMLCleaner' object has no attribute '_remove_empty_elements'
+_____________ TestOCRMathMLCleaner.test_remove_nested_duplicates ______________
+tests\test_ocr_cleaner.py:58: in test_remove_nested_duplicates
+    cleaner._remove_nested_duplicates(root)
+E   AttributeError: 'OCRMathMLCleaner' object has no attribute '_remove_nested_duplicates'
+______________ TestOCRMathMLCleaner.test_remove_empty_subscripts ______________
+tests\test_ocr_cleaner.py:72: in test_remove_empty_subscripts
+    cleaner._clean_structure(root)
+E   AttributeError: 'OCRMathMLCleaner' object has no attribute '_clean_structure'
+_________________ TestOCRMathMLCleaner.test_extract_variables _________________
+tests\test_ocr_cleaner.py:83: in test_extract_variables
+    cleaner._extract_elements(mathml)
+E   AttributeError: 'OCRMathMLCleaner' object has no attribute '_extract_elements'
+________________ TestOCRMathMLCleaner.test_extract_subscripts _________________
+tests\test_ocr_cleaner.py:94: in test_extract_subscripts
+    cleaner._extract_elements(mathml)
+E   AttributeError: 'OCRMathMLCleaner' object has no attribute '_extract_elements'
+_______________ TestOCRMathMLCleaner.test_extract_superscripts ________________
+tests\test_ocr_cleaner.py:106: in test_extract_superscripts
+    cleaner._extract_elements(mathml)
+E   AttributeError: 'OCRMathMLCleaner' object has no attribute '_extract_elements'
+_________________ TestOCRMathMLCleaner.test_extract_operators _________________
+tests\test_ocr_cleaner.py:118: in test_extract_operators
+    cleaner._extract_elements(mathml)
+E   AttributeError: 'OCRMathMLCleaner' object has no attribute '_extract_elements'
+______________ TestOCRMathMLCleaner.test_mathml_to_latex_simple _______________
+tests\test_ocr_cleaner.py:128: in test_mathml_to_latex_simple
+    latex = cleaner._mathml_to_latex(mathml)
+E   AttributeError: 'OCRMathMLCleaner' object has no attribute '_mathml_to_latex'
+_____________ TestOCRMathMLCleaner.test_mathml_to_latex_fraction ______________
+tests\test_ocr_cleaner.py:139: in test_mathml_to_latex_fraction
+    latex = cleaner._mathml_to_latex(mathml)
+E   AttributeError: 'OCRMathMLCleaner' object has no attribute '_mathml_to_latex'
+_____________ TestOCRMathMLCleaner.test_mathml_to_latex_subscript _____________
+tests\test_ocr_cleaner.py:150: in test_mathml_to_latex_subscript
+    latex = cleaner._mathml_to_latex(mathml)
+E   AttributeError: 'OCRMathMLCleaner' object has no attribute '_mathml_to_latex'
+____________ TestOCRMathMLCleaner.test_mathml_to_latex_superscript ____________
+tests\test_ocr_cleaner.py:161: in test_mathml_to_latex_superscript
+    latex = cleaner._mathml_to_latex(mathml)
+E   AttributeError: 'OCRMathMLCleaner' object has no attribute '_mathml_to_latex'
+________________ TestOCRMathMLCleaner.test_full_clean_workflow ________________
+tests\test_ocr_cleaner.py:192: in test_full_clean_workflow
+    assert "├⌐" not in result["mathml"]
+E   AssertionError: assert '├⌐' not in '<math xmlns...</mi></math>'
+E     
+E     '├⌐' is contained here:
+E       <mo /><mi>├⌐</mi><msub><mi>y</mi></msub><mo>+</mo><mi>z</mi></math>
+E     ?           +
+_________________________ test_ingest_mathml_fraction _________________________
+tests\test_ocr_pipeline.py:15: in test_ingest_mathml_fraction
+    assert r"\frac" in result["clean_latex"]
+E   AssertionError: assert '\\frac' in 'a b'
+------------------------------ Captured log call ------------------------------
+WARNING  mathpix_clone:pipeline.py:345 [PIPELINE] FORCE: Corruption detected in raw MathML ΓÇö invoking FORCE recovery immediately
+WARNING  mathpix_clone:pipeline.py:177 [PIPELINE] FORCE recovery detected corruption: shredded pattern: f\s*r\s*a\s*c
+_______________________ test_ingest_latex_pass_through ________________________
+tests\test_ocr_pipeline.py:23: in test_ingest_latex_pass_through
+    result = pipeline.ingest(raw)
+services\ocr\pipeline.py:456: in ingest
+    ai_result = self._try_openai_conversion(clean_latex)
+services\ocr\pipeline.py:303: in _try_openai_conversion
+    if not self.openai_key:
+E   AttributeError: 'MathExpressionPipeline' object has no attribute 'openai_key'
+_______________________ test_ingest_plain_reconstructs ________________________
+tests\test_ocr_pipeline.py:36: in test_ingest_plain_reconstructs
+    assert result["source_type"] == "plain"
+E   AssertionError: assert 'latex' == 'plain'
+E     
+E     - plain
+E     + latex
+___________________ test_mathml_scripts_and_ranges_rebuilt ____________________
+tests\test_ocr_pipeline.py:53: in test_mathml_scripts_and_ranges_rebuilt
+    assert r"x_{i=1}^{K}" in result["clean_latex"]
+E   AssertionError: assert 'x_{i=1}^{K}' in ''
+__________________ test_mathml_brackets_and_limits_repaired ___________________
+tests\test_ocr_pipeline.py:70: in test_mathml_brackets_and_limits_repaired
+    assert "<mo>)</mo>" in result["intermediate_mathml"]
+E   assert '<mo>)</mo>' in '<math xmlns="http://www.w3.org/1998/Math/MathML"><mrow><mo>Γêæ</mo><mo>_</mo><mi>i</mi><mo>=</mo><mn>1</mn><mo>^</mo><mi>n</mi><mo>(</mo><mi>a</mi><mi>i</mi></mrow></math>'
+____________________ test_mathml_prob_union_noise_repaired ____________________
+tests\test_ocr_pipeline.py:122: in test_mathml_prob_union_noise_repaired
+    assert r"P_{r}" in result["clean_latex"]
+E   AssertionError: assert 'P_{r}' in '({K \\P_{e} \\r_{r}\\o_{r} ( C ) = \\\\Pr \\U_{m} # 9 : ( \\Y_{a} , [ 0 ] , a \\Y_{a} ; [ n 1 ) ) } ? i = 1'
+------------------------------ Captured log call ------------------------------
+WARNING  mathpix_clone:pipeline.py:345 [PIPELINE] FORCE: Corruption detected in raw MathML ΓÇö invoking FORCE recovery immediately
+WARNING  mathpix_clone:pipeline.py:177 [PIPELINE] FORCE recovery detected corruption: backslash tokens in MathML tags
+_______________ test_detect_probability_of_error_template_json ________________
+tests\test_ocr_pipeline.py:132: in test_detect_probability_of_error_template_json
+    detected = converter.detect_probability_of_error(noisy)
+E   AttributeError: 'LatexToMathML' object has no attribute 'detect_probability_of_error'
+___________________ test_latex_channel_noise_repaired_basic ___________________
+tests\test_ocr_pipeline.py:144: in test_latex_channel_noise_repaired_basic
+    cleaned = converter._repair_common_ocr_errors(noisy)
+E   AttributeError: 'LatexToMathML' object has no attribute '_repair_common_ocr_errors'
+_________________ test_latex_channel_noise_snaps_to_canonical _________________
+tests\test_ocr_pipeline.py:155: in test_latex_channel_noise_snaps_to_canonical
+    repaired = converter._repair_common_ocr_errors(noisy)
+E   AttributeError: 'LatexToMathML' object has no attribute '_repair_common_ocr_errors'
+_______________ test_latex_channel_noise_variant_hits_canonical _______________
+tests\test_ocr_pipeline.py:163: in test_latex_channel_noise_variant_hits_canonical
+    repaired = converter._repair_common_ocr_errors(noisy)
+E   AttributeError: 'LatexToMathML' object has no attribute '_repair_common_ocr_errors'
+________ test_latex_channel_noise_variant_with_numbers_hits_canonical _________
+tests\test_ocr_pipeline.py:171: in test_latex_channel_noise_variant_with_numbers_hits_canonical
+    repaired = converter._repair_common_ocr_errors(noisy)
+E   AttributeError: 'LatexToMathML' object has no attribute '_repair_common_ocr_errors'
+_______________ test_general_noise_brackets_and_equals_cleanup ________________
+tests\test_ocr_pipeline.py:179: in test_general_noise_brackets_and_equals_cleanup
+    repaired = converter._repair_common_ocr_errors(noisy)
+E   AttributeError: 'LatexToMathML' object has no attribute '_repair_common_ocr_errors'
+_______________ test_general_noise_numbers_and_question_removed _______________
+tests\test_ocr_pipeline.py:188: in test_general_noise_numbers_and_question_removed
+    repaired = converter._repair_common_ocr_errors(noisy)
+E   AttributeError: 'LatexToMathML' object has no attribute '_repair_common_ocr_errors'
+________________________ test_prob_error_template_snap ________________________
+tests\test_ocr_pipeline.py:198: in test_prob_error_template_snap
+    repaired = converter._repair_common_ocr_errors(noisy)
+E   AttributeError: 'LatexToMathML' object has no attribute '_repair_common_ocr_errors'
+_______________ TestLatexValidation.test_unbalanced_braces_fail _______________
+tests\unit\test_latex_validation.py:35: in test_unbalanced_braces_fail
+    assert is_valid == False
+E   assert True == False
+_____________ TestLatexValidation.test_missing_opening_brace_fail _____________
+tests\unit\test_latex_validation.py:43: in test_missing_opening_brace_fail
+    assert is_valid == False
+E   assert True == False
+_______________ TestLatexValidation.test_truncated_command_fail _______________
+tests\unit\test_latex_validation.py:55: in test_truncated_command_fail
+    assert is_valid == False
+E   assert True == False
+____________ TestLatexValidation.test_unbalanced_environments_fail ____________
+tests\unit\test_latex_validation.py:102: in test_unbalanced_environments_fail
+    assert is_valid == False
+E   assert True == False
+_________________ TestLatexValidation.test_too_many_end_fail __________________
+tests\unit\test_latex_validation.py:110: in test_too_many_end_fail
+    assert is_valid == False
+E   assert True == False
+_________ TestLatexValidation.test_mismatched_environment_names_fail __________
+tests\unit\test_latex_validation.py:128: in test_mismatched_environment_names_fail
+    assert is_valid == False
+E   assert True == False
+___________________ TestLatexValidation.test_null_byte_fail ___________________
+tests\unit\test_latex_validation.py:169: in test_null_byte_fail
+    assert is_valid == False
+E   assert True == False
+____________ TestLatexValidation.test_unbalanced_parentheses_fail _____________
+tests\unit\test_latex_validation.py:215: in test_unbalanced_parentheses_fail
+    assert is_valid == False
+E   assert True == False
+______________ TestLatexValidation.test_extra_closing_paren_fail ______________
+tests\unit\test_latex_validation.py:223: in test_extra_closing_paren_fail
+    assert is_valid == False
+E   assert True == False
+______________ TestLatexValidation.test_unbalanced_brackets_fail ______________
+tests\unit\test_latex_validation.py:242: in test_unbalanced_brackets_fail
+    assert is_valid == False
+E   assert True == False
+_____________ TestLatexValidation.test_extra_closing_bracket_fail _____________
+tests\unit\test_latex_validation.py:250: in test_extra_closing_bracket_fail
+    assert is_valid == False
+E   assert True == False
+________________ TestLatexValidation.test_whitespace_only_fail ________________
+tests\unit\test_latex_validation.py:270: in test_whitespace_only_fail
+    assert is_valid == False
+E   assert True == False
+_____________ TestMathMLValidation.test_latex_command_in_mi_fail ______________
+tests\unit\test_mathml_validation.py:30: in test_latex_command_in_mi_fail
+    assert is_valid == False
+E   assert True == False
+_________________ TestMathMLValidation.test_equals_in_mi_fail _________________
+tests\unit\test_mathml_validation.py:49: in test_equals_in_mi_fail
+    assert is_valid == False
+E   assert True == False
+__________________ TestMathMLValidation.test_plus_in_mi_fail __________________
+tests\unit\test_mathml_validation.py:57: in test_plus_in_mi_fail
+    assert is_valid == False
+E   assert True == False
+_______________ TestMathMLValidation.test_summation_in_mi_fail ________________
+tests\unit\test_mathml_validation.py:64: in test_summation_in_mi_fail
+    assert is_valid == False
+E   assert True == False
+________________ TestMathMLValidation.test_element_in_mi_fail _________________
+tests\unit\test_mathml_validation.py:71: in test_element_in_mi_fail
+    assert is_valid == False
+E   assert True == False
+______________ TestMathMLValidation.test_unbalanced_fences_fail _______________
+tests\unit\test_mathml_validation.py:96: in test_unbalanced_fences_fail
+    assert is_valid == False
+E   assert True == False
+__________________ TestMathMLValidation.test_ascii_leq_fail ___________________
+tests\unit\test_mathml_validation.py:115: in test_ascii_leq_fail
+    assert is_valid == False
+E   assert True == False
+__________________ TestMathMLValidation.test_ascii_neq_fail ___________________
+tests\unit\test_mathml_validation.py:123: in test_ascii_neq_fail
+    assert is_valid == False
+E   assert True == False
+______________ TestMathMLValidation.test_missing_namespace_fail _______________
+tests\unit\test_mathml_validation.py:163: in test_missing_namespace_fail
+    assert is_valid == False
+E   assert True == False
+__________________ TestMathMLValidation.test_wrong_root_fail __________________
+tests\unit\test_mathml_validation.py:183: in test_wrong_root_fail
+    assert any("math>" in err or "root" in err for err in errors)
+E   assert False
+E    +  where False = any(<generator object TestMathMLValidation.test_wrong_root_fail.<locals>.<genexpr> at 0x000001ED23BA8E10>)
+_____________ TestMathMLValidation.test_missing_closing_tag_fail ______________
+tests\unit\test_mathml_validation.py:190: in test_missing_closing_tag_fail
+    assert is_valid == False
+E   assert True == False
+___________________ TestMathMLValidation.test_empty_mi_fail ___________________
+tests\unit\test_mathml_validation.py:201: in test_empty_mi_fail
+    assert is_valid == False
+E   assert True == False
+___________________ TestMathMLValidation.test_empty_mo_fail ___________________
+tests\unit\test_mathml_validation.py:209: in test_empty_mo_fail
+    assert is_valid == False
+E   assert True == False
+___________________ TestMathMLValidation.test_empty_mn_fail ___________________
+tests\unit\test_mathml_validation.py:216: in test_empty_mn_fail
+    assert is_valid == False
+E   assert True == False
+________________ TestMathMLValidation.test_latex_in_mtext_fail ________________
+tests\unit\test_mathml_validation.py:253: in test_latex_in_mtext_fail
+    assert is_valid == False
+E   assert True == False
+_______________ TestMathMLValidation.test_javascript_error_fail _______________
+tests\unit\test_mathml_validation.py:261: in test_javascript_error_fail
+    assert is_valid == False
+E   assert True == False
+________________ TestMathMLValidation.test_array_in_mtext_fail ________________
+tests\unit\test_mathml_validation.py:269: in test_array_in_mtext_fail
+    assert is_valid == False
+E   assert True == False
+_________ TestMathMLValidation.test_multiple_violations_all_reported __________
+tests\unit\test_mathml_validation.py:302: in test_multiple_violations_all_reported
+    assert is_valid == False
+E   assert True == False
+______________ TestMultilineConversion.test_convert_simple_align ______________
+tests\unit\test_multiline_conversion.py:121: in test_convert_simple_align
+    assert 'columnalign="right left"' in mathml
+E   assert 'columnalign="right left"' in '<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtable><mtr><mtd><mrow><mi>x</mi></mrow></mtd><mtd>...ext>&#x000A0;</mtext><mi>y</mi></mrow></mtd><mtd><mrow><mo>&#x0003D;</mo><mn>2</mn></mrow></mtd></mtr></mtable></math>'
+________________ TestMultilineConversion.test_convert_eqnarray ________________
+tests\unit\test_multiline_conversion.py:137: in test_convert_eqnarray
+    assert 'columnalign="right center left"' in mathml
+E   assert 'columnalign="right center left"' in '<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtable><mtr><mtd><mrow><mi>a</mi></mrow></mtd><mtd>...>c</mi></mrow></mtd><mtd><mrow><mo>&#x0003D;</mo></mrow></mtd><mtd><mrow><mi>d</mi></mrow></mtd></mtr></mtable></math>'
+_____________ TestMultilineConversion.test_convert_manual_breaks ______________
+tests\unit\test_multiline_conversion.py:150: in test_convert_manual_breaks
+    assert '<mtable' in mathml
+E   assert '<mtable' in '<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mi>x</mi></math>'
+__________ TestMultilineConversion.test_convert_preserves_operators ___________
+tests\unit\test_multiline_conversion.py:161: in test_convert_preserves_operators
+    assert '<mo>=</mo>' in mathml
+E   assert '<mo>=</mo>' in '<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtable><mtr><mtd><mrow><mi>x</mi></mrow></mtd><mtd>...mi></mrow></mtd><mtd><mrow><mo>&#x0003D;</mo><mi>c</mi><mo>&#x02212;</mo><mi>d</mi></mrow></mtd></mtr></mtable></math>'
+______________ TestMultilineConversion.test_convert_empty_cells _______________
+tests\unit\test_multiline_conversion.py:187: in test_convert_empty_cells
+    assert '<mtd></mtd>' in mathml or '<mtd/>' in mathml
+E   assert ('<mtd></mtd>' in '<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtable><mtr><mtd><mtext></mtext></mtd><mtd><mrow><m...>1</mn><mtext>&#x000A0;</mtext><mi>x</mi></mrow></mtd><mtd><mrow><mo>&#x0003D;</mo></mrow></mtd></mtr></mtable></math>' or '<mtd/>' in '<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtable><mtr><mtd><mtext></mtext></mtd><mtd><mrow><m...>1</mn><mtext>&#x000A0;</mtext><mi>x</mi></mrow></mtd><mtd><mrow><mo>&#x0003D;</mo></mrow></mtd></mtr></mtable></math>')
+__________ TestMultilineConversion.test_convert_complex_expressions ___________
+tests\unit\test_multiline_conversion.py:197: in test_convert_complex_expressions
+    assert 'Γêæ' in mathml or 'sum' in mathml.lower()
+E   assert ('Γêæ' in '<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtable><mtr><mtd><mrow><msubsup><mo>&#x02211;</mo><...se">&#x00028;</mo><mi>x</mi><mo stretchy="false">&#x00029;</mo><mi>d</mi><mi>x</mi></mrow></mtd></mtr></mtable></math>' or 'sum' in '<math xmlns="http://www.w3.org/1998/math/mathml" display="block"><mtable><mtr><mtd><mrow><msubsup><mo>&#x02211;</mo><...se">&#x00028;</mo><mi>x</mi><mo stretchy="false">&#x00029;</mo><mi>d</mi><mi>x</mi></mrow></mtd></mtr></mtable></math>')
+E    +  where '<math xmlns="http://www.w3.org/1998/math/mathml" display="block"><mtable><mtr><mtd><mrow><msubsup><mo>&#x02211;</mo><...se">&#x00028;</mo><mi>x</mi><mo stretchy="false">&#x00029;</mo><mi>d</mi><mi>x</mi></mrow></mtd></mtr></mtable></math>' = <built-in method lower of str object at 0x000001ED226C8F40>()
+E    +    where <built-in method lower of str object at 0x000001ED226C8F40> = '<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtable><mtr><mtd><mrow><msubsup><mo>&#x02211;</mo><...se">&#x00028;</mo><mi>x</mi><mo stretchy="false">&#x00029;</mo><mi>d</mi><mi>x</mi></mrow></mtd></mtr></mtable></math>'.lower
+____________ TestMultilineDetection.test_detect_align_environment _____________
+tests\unit\test_multiline_detection.py:27: in test_detect_align_environment
+    info = converter.detect_multiline_equation(latex)
+services\ocr\latex_to_mathml.py:885: in detect_multiline_equation
+    env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+E   NameError: name 'MULTILINE_ENVIRONMENTS' is not defined
+___________ TestMultilineDetection.test_detect_eqnarray_environment ___________
+tests\unit\test_multiline_detection.py:40: in test_detect_eqnarray_environment
+    info = converter.detect_multiline_equation(latex)
+services\ocr\latex_to_mathml.py:885: in detect_multiline_equation
+    env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+E   NameError: name 'MULTILINE_ENVIRONMENTS' is not defined
+____________ TestMultilineDetection.test_detect_cases_environment _____________
+tests\unit\test_multiline_detection.py:52: in test_detect_cases_environment
+    info = converter.detect_multiline_equation(latex)
+services\ocr\latex_to_mathml.py:885: in detect_multiline_equation
+    env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+E   NameError: name 'MULTILINE_ENVIRONMENTS' is not defined
+____________ TestMultilineDetection.test_detect_gather_environment ____________
+tests\unit\test_multiline_detection.py:64: in test_detect_gather_environment
+    info = converter.detect_multiline_equation(latex)
+services\ocr\latex_to_mathml.py:885: in detect_multiline_equation
+    env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+E   NameError: name 'MULTILINE_ENVIRONMENTS' is not defined
+_______ TestMultilineDetection.test_detect_manual_breaks_with_alignment _______
+tests\unit\test_multiline_detection.py:79: in test_detect_manual_breaks_with_alignment
+    info = converter.detect_multiline_equation(latex)
+services\ocr\latex_to_mathml.py:885: in detect_multiline_equation
+    env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+E   NameError: name 'MULTILINE_ENVIRONMENTS' is not defined
+_____ TestMultilineDetection.test_detect_manual_breaks_without_alignment ______
+tests\unit\test_multiline_detection.py:91: in test_detect_manual_breaks_without_alignment
+    info = converter.detect_multiline_equation(latex)
+services\ocr\latex_to_mathml.py:885: in detect_multiline_equation
+    env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+E   NameError: name 'MULTILINE_ENVIRONMENTS' is not defined
+______________ TestMultilineDetection.test_detect_cr_line_breaks ______________
+tests\unit\test_multiline_detection.py:103: in test_detect_cr_line_breaks
+    info = converter.detect_multiline_equation(latex)
+services\ocr\latex_to_mathml.py:885: in detect_multiline_equation
+    env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+E   NameError: name 'MULTILINE_ENVIRONMENTS' is not defined
+______________ TestMultilineDetection.test_single_line_equation _______________
+tests\unit\test_multiline_detection.py:117: in test_single_line_equation
+    info = converter.detect_multiline_equation(latex)
+services\ocr\latex_to_mathml.py:885: in detect_multiline_equation
+    env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+E   NameError: name 'MULTILINE_ENVIRONMENTS' is not defined
+___________ TestMultilineDetection.test_single_line_with_left_right ___________
+tests\unit\test_multiline_detection.py:127: in test_single_line_with_left_right
+    info = converter.detect_multiline_equation(latex)
+services\ocr\latex_to_mathml.py:885: in detect_multiline_equation
+    env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+E   NameError: name 'MULTILINE_ENVIRONMENTS' is not defined
+___________ TestMultilineDetection.test_column_count_one_ampersand ____________
+tests\unit\test_multiline_detection.py:139: in test_column_count_one_ampersand
+    info = converter.detect_multiline_equation(latex)
+services\ocr\latex_to_mathml.py:885: in detect_multiline_equation
+    env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+E   NameError: name 'MULTILINE_ENVIRONMENTS' is not defined
+___________ TestMultilineDetection.test_column_count_two_ampersands ___________
+tests\unit\test_multiline_detection.py:147: in test_column_count_two_ampersands
+    info = converter.detect_multiline_equation(latex)
+services\ocr\latex_to_mathml.py:885: in detect_multiline_equation
+    env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+E   NameError: name 'MULTILINE_ENVIRONMENTS' is not defined
+___________ TestMultilineDetection.test_column_count_no_ampersands ____________
+tests\unit\test_multiline_detection.py:155: in test_column_count_no_ampersands
+    info = converter.detect_multiline_equation(latex)
+services\ocr\latex_to_mathml.py:885: in detect_multiline_equation
+    env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+E   NameError: name 'MULTILINE_ENVIRONMENTS' is not defined
+______________ TestMultilineDetection.test_line_count_two_breaks ______________
+tests\unit\test_multiline_detection.py:167: in test_line_count_two_breaks
+    info = converter.detect_multiline_equation(latex)
+services\ocr\latex_to_mathml.py:885: in detect_multiline_equation
+    env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+E   NameError: name 'MULTILINE_ENVIRONMENTS' is not defined
+____________ TestMultilineDetection.test_line_count_in_environment ____________
+tests\unit\test_multiline_detection.py:175: in test_line_count_in_environment
+    info = converter.detect_multiline_equation(latex)
+services\ocr\latex_to_mathml.py:885: in detect_multiline_equation
+    env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+E   NameError: name 'MULTILINE_ENVIRONMENTS' is not defined
+___________________ TestMultilineDetection.test_empty_latex ___________________
+tests\unit\test_multiline_detection.py:187: in test_empty_latex
+    info = converter.detect_multiline_equation(latex)
+services\ocr\latex_to_mathml.py:885: in detect_multiline_equation
+    env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+E   NameError: name 'MULTILINE_ENVIRONMENTS' is not defined
+_________________ TestMultilineDetection.test_whitespace_only _________________
+tests\unit\test_multiline_detection.py:195: in test_whitespace_only
+    info = converter.detect_multiline_equation(latex)
+services\ocr\latex_to_mathml.py:885: in detect_multiline_equation
+    env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+E   NameError: name 'MULTILINE_ENVIRONMENTS' is not defined
+_______________ TestMultilineDetection.test_nested_environments _______________
+tests\unit\test_multiline_detection.py:203: in test_nested_environments
+    info = converter.detect_multiline_equation(latex)
+services\ocr\latex_to_mathml.py:885: in detect_multiline_equation
+    env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+E   NameError: name 'MULTILINE_ENVIRONMENTS' is not defined
+__________ TestMultilineDetection.test_is_multiline_equation_compat ___________
+tests\unit\test_multiline_detection.py:222: in test_is_multiline_equation_compat
+    info = converter.detect_multiline_equation(latex)
+services\ocr\latex_to_mathml.py:885: in detect_multiline_equation
+    env_pattern = r'\\begin\{(' + '|'.join(MULTILINE_ENVIRONMENTS) + r')\}'
+E   NameError: name 'MULTILINE_ENVIRONMENTS' is not defined
+___________ TestMultilineValidation.test_invalid_columnalign_fails ____________
+tests\unit\test_multiline_validation_rules.py:171: in test_invalid_columnalign_fails
+    assert is_valid == False
+E   assert True == False
+______________ TestMultilineValidation.test_mtd_in_mtable_fails _______________
+tests\unit\test_multiline_validation_rules.py:201: in test_mtd_in_mtable_fails
+    assert any('nesting' in v.lower() or 'invalid direct child' in v for v in violations)
+E   assert False
+E    +  where False = any(<generator object TestMultilineValidation.test_mtd_in_mtable_fails.<locals>.<genexpr> at 0x000001ED23D113C0>)
+============================== warnings summary ===============================
+examples/test_strict_pipeline.py::test_strict_pipeline
+  C:\Program Files\Python313\Lib\site-packages\_pytest\python.py:163: PytestReturnNotNoneWarning: Expected None, but examples/test_strict_pipeline.py::test_strict_pipeline returned {'source_type': 'latex', 'clean_latex': 'Y_j[t] = \\sum_{i \\in \\mathbb{Z}(j)} h_{i,j}[t] X_i[t] + Z_j[t]', 'mathml': '<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi>Y</mi><mi>j</mi></msub><mo>[</mo><mi>t</mi><mo>]</mo><mo>=</mo><mo>Γêæ</mo><munderover><mo>\\limits</mo><mrow><mi>i</mi><mo>Γêê</mo><mtext mathvariant="mathbb">Z</mtext><mo>(</mo><mi>j</mi><mo>)</mo></mrow></munderover><msub><mi>h</mi><mrow><mi>i</mi><mo>,</mo><mi>j</mi></mrow></msub><mo>[</mo><mi>t</mi><mo>]</mo><msub><mi>X</mi><mi>i</mi></msub><mo>[</mo><mi>t</mi><mo>]</mo><mo>+</mo><msub><mi>Z</mi><mi>j</mi></msub><mo>[</mo><mi>t</mi><mo>]</mo></mrow></math>', 'human_readable': 'Y_j[t] = \\sum_{i \\in \\mathbb{Z}(j)} h_{i,j}[t] X_i[t] + Z_j[t]', 'is_valid': True, 'corruption_score': 0.0, 'validation_errors': [], 'corruption_detected': [], 'stage_failed': None, 'used_ai': False, 'log': ['STEP 1.6: Applied semantic normalization', 'STEP 2: REGEX + AST CORRUPTION GATE (CRITICAL)', 'Γ£à RULE 1: LaTeX is semantically clean - SKIPPING corruption checks', 'STEP 4.6: Stripped typographic spacing & invisible chars']}, which will be an error in a future version of pytest.  Did you mean to use `assert` instead of `return`?
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_math_expression_pipeline.py::test_latex_processing - Attrib...
+FAILED tests/test_math_expression_pipeline.py::test_mathml_conversion_failure_returns_safe_math
+FAILED tests/test_multiline_fixes.py::TestMultilineFixes::test_undefined_variable_fix
+FAILED tests/test_multiline_fixes.py::TestMultilineFixes::test_latex_validation
+FAILED tests/test_multiline_fixes.py::TestMultilineFixes::test_line_parsing_accuracy
+FAILED tests/test_multiline_fixes.py::TestMultilineFixes::test_max_lines_limit
+FAILED tests/test_ocr.py::test_latex_to_mathml_empty - Failed: DID NOT RAISE ...
+FAILED tests/test_ocr_cleaner.py::TestOCRMathMLCleaner::test_remove_stray_characters
+FAILED tests/test_ocr_cleaner.py::TestOCRMathMLCleaner::test_fix_ocr_patterns
+FAILED tests/test_ocr_cleaner.py::TestOCRMathMLCleaner::test_remove_empty_elements
+FAILED tests/test_ocr_cleaner.py::TestOCRMathMLCleaner::test_remove_nested_duplicates
+FAILED tests/test_ocr_cleaner.py::TestOCRMathMLCleaner::test_remove_empty_subscripts
+FAILED tests/test_ocr_cleaner.py::TestOCRMathMLCleaner::test_extract_variables
+FAILED tests/test_ocr_cleaner.py::TestOCRMathMLCleaner::test_extract_subscripts
+FAILED tests/test_ocr_cleaner.py::TestOCRMathMLCleaner::test_extract_superscripts
+FAILED tests/test_ocr_cleaner.py::TestOCRMathMLCleaner::test_extract_operators
+FAILED tests/test_ocr_cleaner.py::TestOCRMathMLCleaner::test_mathml_to_latex_simple
+FAILED tests/test_ocr_cleaner.py::TestOCRMathMLCleaner::test_mathml_to_latex_fraction
+FAILED tests/test_ocr_cleaner.py::TestOCRMathMLCleaner::test_mathml_to_latex_subscript
+FAILED tests/test_ocr_cleaner.py::TestOCRMathMLCleaner::test_mathml_to_latex_superscript
+FAILED tests/test_ocr_cleaner.py::TestOCRMathMLCleaner::test_full_clean_workflow
+FAILED tests/test_ocr_pipeline.py::test_ingest_mathml_fraction - AssertionErr...
+FAILED tests/test_ocr_pipeline.py::test_ingest_latex_pass_through - Attribute...
+FAILED tests/test_ocr_pipeline.py::test_ingest_plain_reconstructs - Assertion...
+FAILED tests/test_ocr_pipeline.py::test_mathml_scripts_and_ranges_rebuilt - A...
+FAILED tests/test_ocr_pipeline.py::test_mathml_brackets_and_limits_repaired
+FAILED tests/test_ocr_pipeline.py::test_mathml_prob_union_noise_repaired - As...
+FAILED tests/test_ocr_pipeline.py::test_detect_probability_of_error_template_json
+FAILED tests/test_ocr_pipeline.py::test_latex_channel_noise_repaired_basic - ...
+FAILED tests/test_ocr_pipeline.py::test_latex_channel_noise_snaps_to_canonical
+FAILED tests/test_ocr_pipeline.py::test_latex_channel_noise_variant_hits_canonical
+FAILED tests/test_ocr_pipeline.py::test_latex_channel_noise_variant_with_numbers_hits_canonical
+FAILED tests/test_ocr_pipeline.py::test_general_noise_brackets_and_equals_cleanup
+FAILED tests/test_ocr_pipeline.py::test_general_noise_numbers_and_question_removed
+FAILED tests/test_ocr_pipeline.py::test_prob_error_template_snap - AttributeE...
+FAILED tests/unit/test_latex_validation.py::TestLatexValidation::test_unbalanced_braces_fail
+FAILED tests/unit/test_latex_validation.py::TestLatexValidation::test_missing_opening_brace_fail
+FAILED tests/unit/test_latex_validation.py::TestLatexValidation::test_truncated_command_fail
+FAILED tests/unit/test_latex_validation.py::TestLatexValidation::test_unbalanced_environments_fail
+FAILED tests/unit/test_latex_validation.py::TestLatexValidation::test_too_many_end_fail
+FAILED tests/unit/test_latex_validation.py::TestLatexValidation::test_mismatched_environment_names_fail
+FAILED tests/unit/test_latex_validation.py::TestLatexValidation::test_null_byte_fail
+FAILED tests/unit/test_latex_validation.py::TestLatexValidation::test_unbalanced_parentheses_fail
+FAILED tests/unit/test_latex_validation.py::TestLatexValidation::test_extra_closing_paren_fail
+FAILED tests/unit/test_latex_validation.py::TestLatexValidation::test_unbalanced_brackets_fail
+FAILED tests/unit/test_latex_validation.py::TestLatexValidation::test_extra_closing_bracket_fail
+FAILED tests/unit/test_latex_validation.py::TestLatexValidation::test_whitespace_only_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_latex_command_in_mi_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_equals_in_mi_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_plus_in_mi_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_summation_in_mi_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_element_in_mi_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_unbalanced_fences_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_ascii_leq_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_ascii_neq_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_missing_namespace_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_wrong_root_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_missing_closing_tag_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_empty_mi_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_empty_mo_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_empty_mn_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_latex_in_mtext_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_javascript_error_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_array_in_mtext_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_multiple_violations_all_reported
+FAILED tests/unit/test_multiline_conversion.py::TestMultilineConversion::test_convert_simple_align
+FAILED tests/unit/test_multiline_conversion.py::TestMultilineConversion::test_convert_eqnarray
+FAILED tests/unit/test_multiline_conversion.py::TestMultilineConversion::test_convert_manual_breaks
+FAILED tests/unit/test_multiline_conversion.py::TestMultilineConversion::test_convert_preserves_operators
+FAILED tests/unit/test_multiline_conversion.py::TestMultilineConversion::test_convert_empty_cells
+FAILED tests/unit/test_multiline_conversion.py::TestMultilineConversion::test_convert_complex_expressions
+FAILED tests/unit/test_multiline_detection.py::TestMultilineDetection::test_detect_align_environment
+FAILED tests/unit/test_multiline_detection.py::TestMultilineDetection::test_detect_eqnarray_environment
+FAILED tests/unit/test_multiline_detection.py::TestMultilineDetection::test_detect_cases_environment
+FAILED tests/unit/test_multiline_detection.py::TestMultilineDetection::test_detect_gather_environment
+FAILED tests/unit/test_multiline_detection.py::TestMultilineDetection::test_detect_manual_breaks_with_alignment
+FAILED tests/unit/test_multiline_detection.py::TestMultilineDetection::test_detect_manual_breaks_without_alignment
+FAILED tests/unit/test_multiline_detection.py::TestMultilineDetection::test_detect_cr_line_breaks
+FAILED tests/unit/test_multiline_detection.py::TestMultilineDetection::test_single_line_equation
+FAILED tests/unit/test_multiline_detection.py::TestMultilineDetection::test_single_line_with_left_right
+FAILED tests/unit/test_multiline_detection.py::TestMultilineDetection::test_column_count_one_ampersand
+FAILED tests/unit/test_multiline_detection.py::TestMultilineDetection::test_column_count_two_ampersands
+FAILED tests/unit/test_multiline_detection.py::TestMultilineDetection::test_column_count_no_ampersands
+FAILED tests/unit/test_multiline_detection.py::TestMultilineDetection::test_line_count_two_breaks
+FAILED tests/unit/test_multiline_detection.py::TestMultilineDetection::test_line_count_in_environment
+FAILED tests/unit/test_multiline_detection.py::TestMultilineDetection::test_empty_latex
+FAILED tests/unit/test_multiline_detection.py::TestMultilineDetection::test_whitespace_only
+FAILED tests/unit/test_multiline_detection.py::TestMultilineDetection::test_nested_environments
+FAILED tests/unit/test_multiline_detection.py::TestMultilineDetection::test_is_multiline_equation_compat
+FAILED tests/unit/test_multiline_validation_rules.py::TestMultilineValidation::test_invalid_columnalign_fails
+FAILED tests/unit/test_multiline_validation_rules.py::TestMultilineValidation::test_mtd_in_mtable_fails
+================= 91 failed, 109 passed, 1 warning in 27.48s ==================

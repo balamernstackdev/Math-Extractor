@@ -57,6 +57,9 @@ class MathExpressionPipeline:
         self.reconstructor = reconstructor or DynamicLaTeXReconstructor()
         self.mathml_converter = mathml_converter or LatexToMathML()
         self.mathml_cleaner = mathml_cleaner or OCRMathMLCleaner()
+        from core.config import settings
+        self.openai_key = getattr(settings, "openai_api_key", None)
+
 
     # ---------------------
     # Input detection
@@ -91,7 +94,9 @@ class MathExpressionPipeline:
 
         # explicit shredded textual patterns (loose)
         shredded = [
-            r"l\s*e\s*f\s*t", r"r\s*i\s*g\s*h\s*t", r"s\s*u\s*m", r"f\s*r\s*a\s*c", r"m\s*a\s*t\s*h\s*b\s*b"
+            r"l\s*e\s*f\s*t", r"r\s*i\s*g\s*h\s*t", r"s\s*u\s*m", r"f\s*r\s*a\s*c", r"m\s*a\s*t\s*h\s*b\s*b",
+            r"m\s*u\s*n\s*d\s*e\s*r\s*o\s*v\s*e\s*r", r"m\s*u\s*n\s*d\s*e\s*r", r"m\s*o\s*v\s*e\s*r",
+            r"m\s*s\s*u\s*b\s*s\s*u\s*p", r"m\s*s\s*u\s*b", r"m\s*s\s*u\s*p", r"m\s*t\s*a\s*b\s*l\s*e"
         ]
         for p in shredded:
             if re.search(p, mathml, re.IGNORECASE):
@@ -297,188 +302,209 @@ class MathExpressionPipeline:
     
     def _try_openai_conversion(self, latex: str) -> dict | None:
         """
-        DEPRECATED: OpenAI should NOT convert LaTeX → MathML.
-        
-        According to the MANDATORY PIPELINE:
-        - OpenAI is ONLY used for LaTeX semantic rewriting
-        - MathML MUST come from deterministic LaTeX→MathML compiler (latex2mathml) ONLY
-        - OpenAI MUST NOT generate MathML
-        - OpenAI MUST NOT fix MathML
-        - OpenAI MUST NOT convert LaTeX → MathML
-        
-        Use StrictMathpixPipeline instead for proper pipeline flow.
+        Attempt to use OpenAI for conversion when deterministic methods fail.
+        This provides a fallback for complex equations that latex2mathml cannot handle.
         """
-        logger.warning("[PIPELINE] 🚫 OpenAI LaTeX→MathML conversion DISABLED - use StrictMathpixPipeline instead")
-        logger.warning("[PIPELINE] 🚫 RULE: MathML must come from deterministic LaTeX→MathML compiler only")
-        return None
+        if not self.openai_key:
+            return None
+
+        try:
+            from services.ocr.openai_mathml_converter import OpenAIMathMLConverter
+            converter = OpenAIMathMLConverter(self.openai_key, self.openai_model)
+            
+            # Use the strict conversion mode which handles structure better
+            logger.info("[PIPELINE] 🤖 Attempting OpenAI fallback conversion")
+            result = converter.convert_latex_to_mathml(latex)
+            
+            if result and result.get("mathml"):
+                return result
+            return None
+            
+        except ImportError:
+            logger.warning("[PIPELINE] OpenAI converter module not found")
+            return None
+        except Exception as e:
+            logger.warning(f"[PIPELINE] OpenAI conversion failed: {e}")
+            return None
 
     # ---------------------
     # Public ingest API
     # ---------------------
     def ingest(self, raw_text: str) -> PipelineResult:
         """Master ingestion entrypoint. Returns PipelineResult."""
+        try:
+            source = self.detect_input_type(raw_text)
+            logger.debug("[PIPELINE] Detected source type: %s", source)
 
-        source = self.detect_input_type(raw_text)
-        logger.debug("[PIPELINE] Detected source type: %s", source)
+            # EMPTY
+            if source == "empty":
+                return PipelineResult(source_type="empty", clean_latex="", mathml="", raw_input=raw_text)
 
-        # EMPTY
-        if source == "empty":
-            return PipelineResult(source_type="empty", clean_latex="", mathml="", raw_input=raw_text)
-
-        # MATHML branch - FORCE MODE: Always check for corruption
-        if source == "mathml":
-            logger.info("[PIPELINE] MathML input branch (FORCE mode enabled)")
-            
-            # FORCE MODE: Check for corruption BEFORE cleaning
-            is_corrupted = self._is_corrupted_mathml(raw_text)
-            if is_corrupted:
-                logger.warning("[PIPELINE] FORCE: Corruption detected in raw MathML — invoking FORCE recovery immediately")
-                return self._recover_mathml(raw_text, force_mode=True)
-            
-            # Try cleaning first (if cleaner available)
-            try:
-                cleaned_result = self.mathml_cleaner.clean(raw_text)
-                # Cleaner may return dict or string
-                cleaned_mathml = cleaned_result.get("mathml") if isinstance(cleaned_result, dict) else cleaned_result
-                cleaned_mathml = cleaned_mathml or raw_text
-            except (AttributeError, Exception):
-                # Fallback if cleaner not available or fails
-                cleaned_mathml = raw_text
-            
-            # FORCE MODE: Check again after cleaning - corruption may still exist
-            if self._is_corrupted_mathml(cleaned_mathml):
-                logger.warning("[PIPELINE] FORCE: MathML still corrupted after cleaning — invoking FORCE recovery")
-                return self._recover_mathml(cleaned_mathml, force_mode=True)
-            
-            # FORCE MODE: Even if not obviously corrupted, check for mtext with LaTeX (common OCR issue)
-            if re.search(r'<mtext\b[^>]*>.*\\[A-Za-z]', cleaned_mathml, re.IGNORECASE):
-                logger.warning("[PIPELINE] FORCE: MathML contains mtext with LaTeX — invoking FORCE recovery")
-                return self._recover_mathml(cleaned_mathml, force_mode=True)
-            
-            # MathML is clean - return as-is
-            logger.info("[PIPELINE] MathML is clean, returning as-is")
-            return PipelineResult(
-                source_type="mathml",
-                clean_latex="",
-                mathml=cleaned_mathml,
-                intermediate_mathml=cleaned_mathml,
-                raw_input=raw_text,
-                recovery_confidence=1.0,
-                recovery_log=[],
-            )
-
-        # LATEX branch
-        if source == "latex":
-            logger.info("[PIPELINE] LaTeX input branch")
-            logger.debug("[PIPELINE] Raw LaTeX input: %s", raw_text[:150])
-            
-            # Check if INPUT is already corrupted BEFORE reconstruction
-            input_is_corrupted = self._is_corrupted_latex(raw_text)
-            if input_is_corrupted:
-                logger.warning("[PIPELINE] Input LaTeX is already corrupted, skipping reconstructor to avoid further corruption")
-                clean_latex = raw_text  # Skip reconstructor if input is corrupted
-            else:
-                clean_latex = self.reconstructor.reconstruct(raw_text)
-                logger.debug("[PIPELINE] Reconstructed LaTeX: %s", clean_latex[:150])
-            
-            # Check if LaTeX is corrupted (has shredded patterns)
-            is_corrupted = self._is_corrupted_latex(clean_latex)
-            should_use_openai = self._should_use_openai()
-            
-            logger.info("[PIPELINE] LaTeX corruption check: input_corrupted=%s, output_corrupted=%s, should_use_openai=%s", 
-                       input_is_corrupted, is_corrupted, should_use_openai)
-            
-            # ALWAYS use OpenAI for corrupted LaTeX - it handles complex equations better
-            if is_corrupted and should_use_openai:
-                logger.warning("[PIPELINE] Corrupted LaTeX detected (shredded patterns), using OpenAI for cleanup and conversion")
-                logger.info("[PIPELINE] Calling OpenAI conversion for corrupted LaTeX: %s", clean_latex[:100])
-                # Use OpenAI to both clean LaTeX AND convert to MathML in one step
-                ai_result = self._try_openai_conversion(clean_latex)
-                if ai_result and ai_result.get("mathml"):
-                    logger.info("[PIPELINE] OpenAI handled corrupted LaTeX successfully (confidence: %.2f)", 
-                               ai_result.get("confidence", 0.0))
-                    return PipelineResult(
-                        source_type="latex",
-                        clean_latex=ai_result.get("latex", clean_latex),
-                        mathml=ai_result.get("mathml", ""),
-                        intermediate_mathml=None,
-                        raw_input=raw_text,
-                        recovery_confidence=ai_result.get("confidence", 0.8),
-                        recovery_log=ai_result.get("log", []),
-                    )
-                else:
-                    logger.warning("[PIPELINE] OpenAI conversion failed or returned no MathML, trying cleanup")
-                # If OpenAI failed, try cleanup and continue with standard conversion
-                clean_latex = self._try_openai_latex_cleanup(clean_latex)
-            elif is_corrupted and not should_use_openai:
-                logger.warning("[PIPELINE] Corrupted LaTeX detected but OpenAI not available (API key not set)")
-            
-            mathml = self._safe_latex_to_mathml(clean_latex)
-            
-            # Check if resulting MathML is corrupted (even if LaTeX was clean)
-            is_mathml_corrupted = False
-            if mathml and 'data-error' not in mathml:
-                is_mathml_corrupted = self._is_corrupted_mathml(mathml)
-                if is_mathml_corrupted:
-                    logger.info("[PIPELINE] MathML output contains corruption patterns")
-            
-            # Log MathML status for debugging
-            logger.info("[PIPELINE] MathML conversion result: has_error=%s, is_corrupted=%s, length=%d, should_use_openai=%s", 
-                        'data-error' in mathml if mathml else 'no mathml', is_mathml_corrupted, len(mathml) if mathml else 0, self._should_use_openai())
-            
-            # If MathML conversion failed OR MathML is corrupted, try OpenAI
-            should_try_openai = ('data-error' in mathml or not mathml or is_mathml_corrupted) and self._should_use_openai()
-            
-            # ALWAYS use OpenAI if LaTeX was corrupted (even if conversion "succeeded")
-            # Corrupted LaTeX often produces invalid MathML that needs AI fixing
-            if is_corrupted and self._should_use_openai() and not should_try_openai:
-                logger.info("[PIPELINE] Using OpenAI for corrupted LaTeX (even though conversion appeared to succeed)")
-                should_try_openai = True
-            
-            if should_try_openai:
-                if is_mathml_corrupted:
-                    logger.info("[PIPELINE] Corrupted MathML detected in output, attempting OpenAI fix")
-                elif 'data-error' in mathml or not mathml:
-                    logger.info("[PIPELINE] MathML conversion failed, trying OpenAI")
-                else:
-                    logger.info("[PIPELINE] Attempting OpenAI conversion")
+            # MATHML branch - FORCE MODE: Always check for corruption
+            if source == "mathml":
+                logger.info("[PIPELINE] MathML input branch (FORCE mode enabled)")
                 
-                ai_result = self._try_openai_conversion(clean_latex)
-                if ai_result and ai_result.get("mathml"):
-                    logger.info("[PIPELINE] OpenAI produced clean MathML (confidence: %.2f)", 
-                               ai_result.get("confidence", 0.0))
-                    return PipelineResult(
-                        source_type="latex",
-                        clean_latex=ai_result.get("latex", clean_latex),
-                        mathml=ai_result.get("mathml", mathml),
-                        intermediate_mathml=None,
-                        raw_input=raw_text,
-                        recovery_confidence=ai_result.get("confidence", 0.8),
-                        recovery_log=ai_result.get("log", []),
-                    )
+                # FORCE MODE: Check for corruption BEFORE cleaning
+                is_corrupted = self._is_corrupted_mathml(raw_text)
+                if is_corrupted:
+                    logger.warning("[PIPELINE] FORCE: Corruption detected in raw MathML — invoking FORCE recovery immediately")
+                    return self._recover_mathml(raw_text, force_mode=True)
+                
+                # Try cleaning first (if cleaner available)
+                try:
+                    cleaned_result = self.mathml_cleaner.clean(raw_text)
+                    # Cleaner may return dict or string
+                    cleaned_mathml = cleaned_result.get("mathml") if isinstance(cleaned_result, dict) else cleaned_result
+                    cleaned_mathml = cleaned_mathml or raw_text
+                except (AttributeError, Exception):
+                    # Fallback if cleaner not available or fails
+                    cleaned_mathml = raw_text
+                
+                # FORCE MODE: Check again after cleaning - corruption may still exist
+                if self._is_corrupted_mathml(cleaned_mathml):
+                    logger.warning("[PIPELINE] FORCE: MathML still corrupted after cleaning — invoking FORCE recovery")
+                    return self._recover_mathml(cleaned_mathml, force_mode=True)
+                
+                # FORCE MODE: Even if not obviously corrupted, check for mtext with LaTeX (common OCR issue)
+                if re.search(r'<mtext\b[^>]*>.*\\[A-Za-z]', cleaned_mathml, re.IGNORECASE):
+                    logger.warning("[PIPELINE] FORCE: MathML contains mtext with LaTeX — invoking FORCE recovery")
+                    return self._recover_mathml(cleaned_mathml, force_mode=True)
+                
+                # MathML is clean - return as-is
+                logger.info("[PIPELINE] MathML is clean, returning as-is")
+                return PipelineResult(
+                    source_type="mathml",
+                    clean_latex="",
+                    mathml=cleaned_mathml,
+                    intermediate_mathml=cleaned_mathml,
+                    raw_input=raw_text,
+                    recovery_confidence=1.0,
+                    recovery_log=[],
+                )
+
+            # LATEX branch
+            if source == "latex":
+                logger.info("[PIPELINE] LaTeX input branch")
+                logger.debug("[PIPELINE] Raw LaTeX input: %s", raw_text[:150])
+                
+                # Check if INPUT is already corrupted BEFORE reconstruction
+                input_is_corrupted = self._is_corrupted_latex(raw_text)
+                if input_is_corrupted:
+                    logger.warning("[PIPELINE] Input LaTeX is already corrupted, skipping reconstructor to avoid further corruption")
+                    clean_latex = raw_text  # Skip reconstructor if input is corrupted
                 else:
-                    logger.debug("[PIPELINE] OpenAI conversion did not produce MathML")
+                    clean_latex = self.reconstructor.reconstruct(raw_text)
+                    logger.debug("[PIPELINE] Reconstructed LaTeX: %s", clean_latex[:150])
+                
+                # Check if LaTeX is corrupted (has shredded patterns)
+                is_corrupted = self._is_corrupted_latex(clean_latex)
+                should_use_openai = self._should_use_openai()
+                
+                logger.info("[PIPELINE] LaTeX corruption check: input_corrupted=%s, output_corrupted=%s, should_use_openai=%s", 
+                           input_is_corrupted, is_corrupted, should_use_openai)
+                
+                # ALWAYS use OpenAI for corrupted LaTeX - it handles complex equations better
+                if is_corrupted and should_use_openai:
+                    logger.warning("[PIPELINE] Corrupted LaTeX detected (shredded patterns), using OpenAI for cleanup and conversion")
+                    logger.info("[PIPELINE] Calling OpenAI conversion for corrupted LaTeX: %s", clean_latex[:100])
+                    # Use OpenAI to both clean LaTeX AND convert to MathML in one step
+                    ai_result = self._try_openai_conversion(clean_latex)
+                    if ai_result and ai_result.get("mathml"):
+                        logger.info("[PIPELINE] OpenAI handled corrupted LaTeX successfully (confidence: %.2f)", 
+                                   ai_result.get("confidence", 0.0))
+                        return PipelineResult(
+                            source_type="latex",
+                            clean_latex=ai_result.get("latex", clean_latex),
+                            mathml=ai_result.get("mathml", ""),
+                            intermediate_mathml=None,
+                            raw_input=raw_text,
+                            recovery_confidence=ai_result.get("confidence", 0.8),
+                            recovery_log=ai_result.get("log", []),
+                        )
+                    else:
+                        logger.warning("[PIPELINE] OpenAI conversion failed or returned no MathML, trying cleanup")
+                    # If OpenAI failed, try cleanup and continue with standard conversion
+                    clean_latex = self._try_openai_latex_cleanup(clean_latex)
+                elif is_corrupted and not should_use_openai:
+                    logger.warning("[PIPELINE] Corrupted LaTeX detected but OpenAI not available (API key not set)")
+                
+                mathml = self._safe_latex_to_mathml(clean_latex)
+                
+                # Check if resulting MathML is corrupted (even if LaTeX was clean)
+                is_mathml_corrupted = False
+                if mathml and 'data-error' not in mathml:
+                    is_mathml_corrupted = self._is_corrupted_mathml(mathml)
+                    if is_mathml_corrupted:
+                        logger.info("[PIPELINE] MathML output contains corruption patterns")
+                
+                # Log MathML status for debugging
+                logger.info("[PIPELINE] MathML conversion result: has_error=%s, is_corrupted=%s, length=%d, should_use_openai=%s", 
+                            'data-error' in mathml if mathml else 'no mathml', is_mathml_corrupted, len(mathml) if mathml else 0, self._should_use_openai())
+                
+                # If MathML conversion failed OR MathML is corrupted, try OpenAI
+                should_try_openai = ('data-error' in mathml or not mathml or is_mathml_corrupted) and self._should_use_openai()
+                
+                # ALWAYS use OpenAI if LaTeX was corrupted (even if conversion "succeeded")
+                # Corrupted LaTeX often produces invalid MathML that needs AI fixing
+                if is_corrupted and self._should_use_openai() and not should_try_openai:
+                    logger.info("[PIPELINE] Using OpenAI for corrupted LaTeX (even though conversion appeared to succeed)")
+                    should_try_openai = True
+                
+                if should_try_openai:
+                    if is_mathml_corrupted:
+                        logger.info("[PIPELINE] Corrupted MathML detected in output, attempting OpenAI fix")
+                    elif 'data-error' in mathml or not mathml:
+                        logger.info("[PIPELINE] MathML conversion failed, trying OpenAI")
+                    else:
+                        logger.info("[PIPELINE] Attempting OpenAI conversion")
+                    
+                    ai_result = self._try_openai_conversion(clean_latex)
+                    if ai_result and ai_result.get("mathml"):
+                        logger.info("[PIPELINE] OpenAI produced clean MathML (confidence: %.2f)", 
+                                   ai_result.get("confidence", 0.0))
+                        return PipelineResult(
+                            source_type="latex",
+                            clean_latex=ai_result.get("latex", clean_latex),
+                            mathml=ai_result.get("mathml", mathml),
+                            intermediate_mathml=None,
+                            raw_input=raw_text,
+                            recovery_confidence=ai_result.get("confidence", 0.8),
+                            recovery_log=ai_result.get("log", []),
+                        )
+                    else:
+                        logger.debug("[PIPELINE] OpenAI conversion did not produce MathML")
+                
+                return PipelineResult(
+                    source_type="latex",
+                    clean_latex=clean_latex,
+                    mathml=mathml,
+                    intermediate_mathml=None,
+                    raw_input=raw_text,
+                )
+
+            # PLAIN OCR branch
+            if source == "plain":
+                logger.info("[PIPELINE] Plain OCR input branch (treat as text → reconstruct)")
+                clean_latex = self.reconstructor.reconstruct(raw_text)
+                mathml = self._safe_latex_to_mathml(clean_latex)
+                return PipelineResult(
+                    source_type="plain",
+                    clean_latex=clean_latex,
+                    mathml=mathml,
+                    intermediate_mathml=None,
+                    raw_input=raw_text,
+                )
+
+            # Shouldn't reach here
+            raise RuntimeError(f"[PIPELINE] Unhandled pipeline state: {source}")
             
+        except Exception as e:
+            logger.exception(f"[PIPELINE] Critical ingestion crash for: {raw_text[:100]}...")
             return PipelineResult(
-                source_type="latex",
-                clean_latex=clean_latex,
-                mathml=mathml,
-                intermediate_mathml=None,
+                source_type="empty",
+                clean_latex=raw_text,
+                mathml='<math xmlns="http://www.w3.org/1998/Math/MathML" data-error="pipeline-crash"/>',
                 raw_input=raw_text,
+                recovery_confidence=0.0,
+                recovery_log=[f"Pipeline crash: {str(e)}"]
             )
-
-        # PLAIN OCR branch
-        if source == "plain":
-            logger.info("[PIPELINE] Plain OCR input branch (treat as text → reconstruct)")
-            clean_latex = self.reconstructor.reconstruct(raw_text)
-            mathml = self._safe_latex_to_mathml(clean_latex)
-            return PipelineResult(
-                source_type="plain",
-                clean_latex=clean_latex,
-                mathml=mathml,
-                intermediate_mathml=None,
-                raw_input=raw_text,
-            )
-
-        # Shouldn't reach here
-        raise RuntimeError(f"[PIPELINE] Unhandled pipeline state: {source}")

@@ -35,6 +35,15 @@ except Exception:
     HAS_LATEX2MATHML = False
     logger.info("latex2mathml not available — ULTRA will return LaTeX and best-effort MathML wrappers")
 
+# Optional OpenAI converter
+try:
+    from services.ocr.openai_mathml_converter import OpenAIMathMLConverter
+    HAS_OPENAI = True
+except ImportError:
+    HAS_OPENAI = False
+    OpenAIMathMLConverter = None
+    logger.info("OpenAIMathMLConverter not available — ULTRA OpenAI fallback disabled")
+
 
 # -----------------------
 # Config / Repairs maps

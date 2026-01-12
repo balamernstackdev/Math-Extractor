@@ -1,0 +1,73 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.13.7, pytest-8.3.3, pluggy-1.6.0 -- C:\Program Files\Python313\python.exe
+cachedir: .pytest_cache
+rootdir: D:\test-r&d\mathpix_clone
+plugins: anyio-4.12.0, cov-7.0.0
+collecting ... collected 28 items
+
+tests/unit/test_latex_validation.py::TestLatexValidation::test_balanced_braces_pass PASSED [  3%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_unbalanced_braces_fail PASSED [  7%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_missing_opening_brace_fail PASSED [ 10%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_truncated_command_fail PASSED [ 14%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_complete_command_pass PASSED [ 17%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_balanced_delimiters_pass PASSED [ 21%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_unmatched_left_warn FAILED [ 25%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_balanced_environments_pass PASSED [ 28%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_unbalanced_environments_fail PASSED [ 32%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_too_many_end_fail PASSED [ 35%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_matching_environment_names_pass PASSED [ 39%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_mismatched_environment_names_fail PASSED [ 42%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_valid_environment_name_pass PASSED [ 46%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_unknown_environment_warn PASSED [ 50%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_no_control_chars_pass PASSED [ 53%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_null_byte_fail PASSED [ 57%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_complete_fraction_pass PASSED [ 60%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_empty_numerator_warn PASSED [ 64%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_empty_denominator_warn PASSED [ 67%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_balanced_parentheses_pass PASSED [ 71%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_unbalanced_parentheses_fail PASSED [ 75%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_extra_closing_paren_fail PASSED [ 78%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_balanced_brackets_pass PASSED [ 82%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_unbalanced_brackets_fail PASSED [ 85%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_extra_closing_bracket_fail PASSED [ 89%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_empty_latex_fail FAILED [ 92%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_whitespace_only_fail PASSED [ 96%]
+tests/unit/test_latex_validation.py::TestLatexValidation::test_complex_equation_pass PASSED [100%]
+
+================================== FAILURES ===================================
+________________ TestLatexValidation.test_unmatched_left_warn _________________
+
+self = <test_latex_validation.TestLatexValidation object at 0x000001AE7649D8C0>
+converter = <services.ocr.latex_to_mathml.LatexToMathML object at 0x000001AE7649DD00>
+
+    @pytest.mark.unit
+    def test_unmatched_left_warn(self, converter):
+        """Test that unmatched \left triggers warning."""
+        latex = r'\left( x'
+        is_valid, error = converter._validate_latex(latex)
+        # This should warn but not fail (will be logged)
+        # The validation might pass with a warning
+>       assert is_valid == True or "left" in error.lower()
+E       AssertionError: assert (False == True or 'left' in 'unbalanced: parentheses mismatch (1 vs 0)')
+E        +  where 'unbalanced: parentheses mismatch (1 vs 0)' = <built-in method lower of str object at 0x000001AE764F7390>()
+E        +    where <built-in method lower of str object at 0x000001AE764F7390> = 'UNBALANCED: Parentheses mismatch (1 vs 0)'.lower
+
+tests\unit\test_latex_validation.py:84: AssertionError
+__________________ TestLatexValidation.test_empty_latex_fail __________________
+
+self = <test_latex_validation.TestLatexValidation object at 0x000001AE762DACF0>
+converter = <services.ocr.latex_to_mathml.LatexToMathML object at 0x000001AE76317C50>
+
+    @pytest.mark.unit
+    def test_empty_latex_fail(self, converter):
+        """Test that empty LaTeX fails."""
+        latex = ''
+        is_valid, error = converter._validate_latex(latex)
+>       assert is_valid == False
+E       assert True == False
+
+tests\unit\test_latex_validation.py:262: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_latex_validation.py::TestLatexValidation::test_unmatched_left_warn
+FAILED tests/unit/test_latex_validation.py::TestLatexValidation::test_empty_latex_fail
+======================== 2 failed, 26 passed in 0.52s =========================

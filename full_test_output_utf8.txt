@@ -1,0 +1,32 @@
+﻿--- Testing Summation with Limits ---
+[PASS]
+--- Testing Binomial Coefficient ---
+[PASS]
+--- Testing Limit Operator ---
+[PASS]
+--- Testing Bracketed Matrix ---
+[PASS]
+--- Testing Parenthesized Matrix ---
+[PASS]
+--- Testing Aligned Environment ---
+[PASS]
+--- Testing Cases Environment ---
+[PASS]
+--- Testing Double Integral with limits ---
+[FAIL]
+  LaTeX: \iint_{D} f(x,y) dA
+  MathML: <math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><munder accent="false"><mo>Γê¼</mo><mrow><mi>D</mi></mrow></munder><mi>f</mi><mo>(</mo><mi>x</mi><mo>,</mo><mi>y</mi><mo>)</mo><mi>
+--- Testing Vector Accent ---
+[PASS]
+--- Testing Dot Accent (Velocity) ---
+[PASS]
+--- Testing Derivative (Differential) ---
+[FAIL]
+  LaTeX: \frac{d}{dx} f(x)
+  MathML: <math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>f</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow></math>
+--- Testing Align Environment ---
+[PASS]
+--- Testing Equation Tag ---
+[PASS]
+
+Summary: 11/13 passed

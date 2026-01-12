@@ -80,16 +80,17 @@ def main():
     # Recommendations
     print()
     print("Recommendations:")
+    print("Recommendations:")
     if 'build' in sizes:
-        print("  ✅ Delete 'build/' directory (can be regenerated)")
+        print("  [OK] Delete 'build/' directory (can be regenerated)")
     if 'dist' in sizes:
-        print("  ⚠️  'dist/' contains your EXE - keep if needed")
+        print("  [WARN] 'dist/' contains your EXE - keep if needed")
     if 'venv' in sizes or '.venv' in sizes:
-        print("  ✅ Add 'venv/' to .gitignore (should not be in Git)")
+        print("  [OK] Add 'venv/' to .gitignore (should not be in Git)")
     if 'data' in sizes:
-        print("  ✅ Add 'data/uploads/' to .gitignore (user data)")
+        print("  [OK] Add 'data/uploads/' to .gitignore (user data)")
     if '__pycache__' in sizes:
-        print("  ✅ Delete '__pycache__/' directories (can be regenerated)")
+        print("  [OK] Delete '__pycache__/' directories (can be regenerated)")
 
 if __name__ == "__main__":
     main()

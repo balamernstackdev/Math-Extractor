@@ -1,0 +1,216 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.13.7, pytest-8.3.3, pluggy-1.6.0 -- C:\Program Files\Python313\python.exe
+cachedir: .pytest_cache
+rootdir: D:\test-r&d\mathpix_clone
+plugins: anyio-4.12.0, cov-7.0.0
+collecting ... collected 30 items
+
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_no_latex_commands_pass PASSED [  3%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_latex_command_in_mi_fail PASSED [  6%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_operator_in_mo_pass PASSED [ 10%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_equals_in_mi_fail PASSED [ 13%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_plus_in_mi_fail PASSED [ 16%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_summation_in_mi_fail FAILED [ 20%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_element_in_mi_fail FAILED [ 23%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_balanced_fences_pass PASSED [ 26%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_unbalanced_fences_fail FAILED [ 30%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_unicode_leq_pass PASSED [ 33%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_ascii_leq_fail FAILED [ 36%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_ascii_neq_fail FAILED [ 40%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_valid_subscript_pass PASSED [ 43%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_valid_superscript_pass PASSED [ 46%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_valid_namespace_pass PASSED [ 50%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_missing_namespace_fail PASSED [ 53%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_math_root_pass PASSED [ 56%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_wrong_root_fail FAILED [ 60%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_missing_closing_tag_fail FAILED [ 63%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_empty_mi_fail FAILED [ 66%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_empty_mo_fail FAILED [ 70%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_empty_mn_fail FAILED [ 73%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_block_display_pass PASSED [ 76%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_inline_display_pass PASSED [ 80%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_invalid_display_fail PASSED [ 83%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_latex_in_mtext_fail PASSED [ 86%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_javascript_error_fail FAILED [ 90%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_array_in_mtext_fail FAILED [ 93%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_complex_valid_mathml_pass PASSED [ 96%]
+tests/unit/test_mathml_validation.py::TestMathMLValidation::test_multiple_violations_all_reported PASSED [100%]
+
+================================== FAILURES ===================================
+_______________ TestMathMLValidation.test_summation_in_mi_fail ________________
+
+self = <test_mathml_validation.TestMathMLValidation object at 0x000001DF57974AF0>
+
+    @pytest.mark.unit
+    def test_summation_in_mi_fail(self):
+        """Test that Γêæ in <mi> fails."""
+        mathml = '<math xmlns="http://www.w3.org/1998/Math/MathML"><mi>Γêæ</mi></math>'
+        is_valid, errors = validate_mathml_strict(mathml)
+>       assert is_valid == False
+E       assert True == False
+
+tests\unit\test_mathml_validation.py:64: AssertionError
+________________ TestMathMLValidation.test_element_in_mi_fail _________________
+
+self = <test_mathml_validation.TestMathMLValidation object at 0x000001DF57974D10>
+
+    @pytest.mark.unit
+    def test_element_in_mi_fail(self):
+        """Test that Γêê in <mi> fails."""
+        mathml = '<math xmlns="http://www.w3.org/1998/Math/MathML"><mi>Γêê</mi></math>'
+        is_valid, errors = validate_mathml_strict(mathml)
+>       assert is_valid == False
+E       assert True == False
+
+tests\unit\test_mathml_validation.py:71: AssertionError
+______________ TestMathMLValidation.test_unbalanced_fences_fail _______________
+
+self = <test_mathml_validation.TestMathMLValidation object at 0x000001DF577EAF50>
+
+    @pytest.mark.unit
+    def test_unbalanced_fences_fail(self):
+        """Test that unbalanced fences fail."""
+        mathml = '''<math xmlns="http://www.w3.org/1998/Math/MathML">
+            <mo fence="true" form="prefix">(</mo>
+            <mi>x</mi>
+        </math>'''
+        is_valid, errors = validate_mathml_strict(mathml)
+>       assert is_valid == False
+E       assert True == False
+
+tests\unit\test_mathml_validation.py:96: AssertionError
+__________________ TestMathMLValidation.test_ascii_leq_fail ___________________
+
+self = <test_mathml_validation.TestMathMLValidation object at 0x000001DF577B3200>
+
+    @pytest.mark.unit
+    def test_ascii_leq_fail(self):
+        """Test that ASCII <= in <mi> fails."""
+        mathml = '<math xmlns="http://www.w3.org/1998/Math/MathML"><mi><=</mi></math>'
+        is_valid, errors = validate_mathml_strict(mathml)
+>       assert is_valid == False
+E       assert True == False
+
+tests\unit\test_mathml_validation.py:115: AssertionError
+__________________ TestMathMLValidation.test_ascii_neq_fail ___________________
+
+self = <test_mathml_validation.TestMathMLValidation object at 0x000001DF57956C10>
+
+    @pytest.mark.unit
+    def test_ascii_neq_fail(self):
+        """Test that ASCII != fails."""
+        mathml = '<math xmlns="http://www.w3.org/1998/Math/MathML"><mi>!=</mi></math>'
+        is_valid, errors = validate_mathml_strict(mathml)
+>       assert is_valid == False
+E       assert True == False
+
+tests\unit\test_mathml_validation.py:123: AssertionError
+__________________ TestMathMLValidation.test_wrong_root_fail __________________
+
+self = <test_mathml_validation.TestMathMLValidation object at 0x000001DF577E22B0>
+
+    @pytest.mark.unit
+    def test_wrong_root_fail(self):
+        """Test that non-<math> root fails (BLOCKER)."""
+        mathml = '<div><mi>x</mi></div>'
+        is_valid, errors = validate_mathml_strict(mathml)
+        assert is_valid == False
+>       assert any("math>" in err or "root" in err for err in errors)
+E       assert False
+E        +  where False = any(<generator object TestMathMLValidation.test_wrong_root_fail.<locals>.<genexpr> at 0x000001DF57868A00>)
+
+tests\unit\test_mathml_validation.py:183: AssertionError
+_____________ TestMathMLValidation.test_missing_closing_tag_fail ______________
+
+self = <test_mathml_validation.TestMathMLValidation object at 0x000001DF576E8F50>
+
+    @pytest.mark.unit
+    def test_missing_closing_tag_fail(self):
+        """Test that missing </math> fails."""
+        mathml = '<math xmlns="http://www.w3.org/1998/Math/MathML"><mi>x</mi>'
+        is_valid, errors = validate_mathml_strict(mathml)
+>       assert is_valid == False
+E       assert True == False
+
+tests\unit\test_mathml_validation.py:190: AssertionError
+___________________ TestMathMLValidation.test_empty_mi_fail ___________________
+
+self = <test_mathml_validation.TestMathMLValidation object at 0x000001DF579A4050>
+
+    @pytest.mark.unit
+    def test_empty_mi_fail(self):
+        """Test that empty <mi> fails."""
+        mathml = '<math xmlns="http://www.w3.org/1998/Math/MathML"><mi></mi></math>'
+        is_valid, errors = validate_mathml_strict(mathml)
+>       assert is_valid == False
+E       assert True == False
+
+tests\unit\test_mathml_validation.py:201: AssertionError
+___________________ TestMathMLValidation.test_empty_mo_fail ___________________
+
+self = <test_mathml_validation.TestMathMLValidation object at 0x000001DF57809D00>
+
+    @pytest.mark.unit
+    def test_empty_mo_fail(self):
+        """Test that empty <mo> fails."""
+        mathml = '<math xmlns="http://www.w3.org/1998/Math/MathML"><mo></mo></math>'
+        is_valid, errors = validate_mathml_strict(mathml)
+>       assert is_valid == False
+E       assert True == False
+
+tests\unit\test_mathml_validation.py:209: AssertionError
+___________________ TestMathMLValidation.test_empty_mn_fail ___________________
+
+self = <test_mathml_validation.TestMathMLValidation object at 0x000001DF579965D0>
+
+    @pytest.mark.unit
+    def test_empty_mn_fail(self):
+        """Test that empty <mn> fails."""
+        mathml = '<math xmlns="http://www.w3.org/1998/Math/MathML"><mn></mn></math>'
+        is_valid, errors = validate_mathml_strict(mathml)
+>       assert is_valid == False
+E       assert True == False
+
+tests\unit\test_mathml_validation.py:216: AssertionError
+_______________ TestMathMLValidation.test_javascript_error_fail _______________
+
+self = <test_mathml_validation.TestMathMLValidation object at 0x000001DF53FF6C30>
+
+    @pytest.mark.unit
+    def test_javascript_error_fail(self):
+        """Test that JavaScript error pattern fails (GATEKEEPER)."""
+        mathml = '<math xmlns="http://www.w3.org/1998/Math/MathML"><mtext>[object Object]</mtext></math>'
+        is_valid, errors = validate_mathml_strict(mathml)
+>       assert is_valid == False
+E       assert True == False
+
+tests\unit\test_mathml_validation.py:261: AssertionError
+________________ TestMathMLValidation.test_array_in_mtext_fail ________________
+
+self = <test_mathml_validation.TestMathMLValidation object at 0x000001DF57701AE0>
+
+    @pytest.mark.unit
+    def test_array_in_mtext_fail(self):
+        """Test that array environment in <mtext> fails (GATEKEEPER)."""
+        mathml = '<math xmlns="http://www.w3.org/1998/Math/MathML"><mtext>\\begin{array}</mtext></math>'
+        is_valid, errors = validate_mathml_strict(mathml)
+        assert is_valid == False
+>       assert any("GATEKEEPER" in err or "array" in err for err in errors)
+E       assert False
+E        +  where False = any(<generator object TestMathMLValidation.test_array_in_mtext_fail.<locals>.<genexpr> at 0x000001DF57868C70>)
+
+tests\unit\test_mathml_validation.py:270: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_summation_in_mi_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_element_in_mi_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_unbalanced_fences_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_ascii_leq_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_ascii_neq_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_wrong_root_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_missing_closing_tag_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_empty_mi_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_empty_mo_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_empty_mn_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_javascript_error_fail
+FAILED tests/unit/test_mathml_validation.py::TestMathMLValidation::test_array_in_mtext_fail
+======================== 12 failed, 18 passed in 0.32s ========================

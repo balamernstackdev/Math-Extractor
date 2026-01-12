@@ -6,6 +6,7 @@ from pathlib import Path
 from PyQt6 import QtWidgets
 
 from core.config import settings
+from ui.styles import Theme
 
 
 class NotesPage(QtWidgets.QFrame):
@@ -15,6 +16,16 @@ class NotesPage(QtWidgets.QFrame):
         super().__init__()
         layout = QtWidgets.QVBoxLayout(self)
         self.editor = QtWidgets.QTextEdit()
+        self.editor.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {Theme.SURFACE};
+                color: {Theme.TEXT_PRIMARY};
+                border: 1px solid {Theme.BORDER};
+                border-radius: 8px;
+                padding: 12px;
+                font-family: {Theme.FONT_FAMILY};
+            }}
+        """)
         self.save_path = settings.notes_dir / "notes.md"
         layout.addWidget(self.editor)
 

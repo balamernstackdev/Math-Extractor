@@ -1,0 +1,5 @@
+﻿2025-12-23 18:19:45,931 - INFO - === MATHPIX DEBUG LOGGER STARTED ===
+2025-12-23 18:19:47,266 - INFO - Dependency check: FAILED to import timm: No module named 'torch.cuda'
+2025-12-23 18:19:47,273 - INFO - Dependency check: einops imported successfully
+2025-12-23 18:19:47,290 - INFO - Dependency check: FAILED to import torchvision: No module named 'torch.cuda'
+2025-12-23 18:19:48,345 - INFO - ImportError during initialization: No module named 'scipy'

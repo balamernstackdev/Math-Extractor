@@ -1,0 +1,4 @@
+Valid? True ()
+MathML len: 617
+✅ Found 'double-struck' attribute.
+Snippet: mstyle mathvariant="double-struck"><mi>Z</mi></mstyle><mo>(</mo><mi>j<

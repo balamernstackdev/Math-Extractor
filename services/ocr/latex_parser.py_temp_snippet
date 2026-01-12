@@ -1,0 +1,119 @@
+
+    def _consume_group(self, latex: str, start_index: int) -> Tuple[str, int]:
+        """
+        Consume a LaTeX group starting at start_index.
+        Can be {...} or a single character if no brace.
+        Returns (content, new_index).
+        """
+        i = start_index
+        # Skip whitespace
+        while i < len(latex) and latex[i].isspace():
+            i += 1
+            
+        if i >= len(latex):
+            return "", i
+            
+        if latex[i] == '{':
+            # Find matching brace
+            depth = 1
+            start_content = i + 1
+            i += 1
+            while i < len(latex) and depth > 0:
+                if latex[i] == '{':
+                    depth += 1
+                elif latex[i] == '}':
+                    depth -= 1
+                i += 1
+            
+            if depth == 0:
+                return latex[start_content : i-1], i
+            else:
+                # Unbalanced - return rest
+                return latex[start_content:], len(latex)
+        else:
+            # Single character or command?
+            # Standard LaTeX consumes the next token. 
+            # If it's a backslash, we need to consume the command.
+            if latex[i] == '\\':
+                j = i + 1
+                while j < len(latex) and latex[j].isalpha():
+                    j += 1
+                return latex[i:j], j
+            else:
+                return latex[i], i + 1
+
+    def _parse_expression(self, latex: str) -> ASTNode:
+        """Parse a LaTeX expression string into an AST node."""
+        if not latex or not latex.strip():
+            return ASTNode(node_type="row", children=[])
+            
+        tokens = self._tokenize(latex)
+        children = []
+        
+        for token in tokens:
+            node = self._parse_token(token)
+            if node:
+                children.append(node)
+                
+        # Optimization: Flatten rows if needed or keep structural
+        return ASTNode(node_type="row", children=children)
+
+    def _parse_token(self, token: str) -> Optional[ASTNode]:
+        """Convert a single token string into an ASTNode."""
+        if not token:
+            return None
+            
+        # Fraction
+        if token.startswith(r'\frac'):
+            return self._parse_fraction(token)
+            
+        # Sqrt
+        if token.startswith(r'\sqrt'):
+            return self._parse_sqrt(token)
+            
+        # Stackrel
+        if token.startswith(r'\stackrel'):
+             match = re.match(r'\\stackrel\{([^{}]*)\}\{([^{}]*)\}', token)
+             if match:
+                 top = match.group(1)
+                 bottom = match.group(2)
+                 # Treat as overscript or operator with limit
+                 return ASTNode(node_type="underscript", children=[
+                     self._parse_expression(bottom),
+                     self._parse_expression(top) # actually stackrel puts top ON bottom usually, or relation
+                 ])
+                 # MathML: <mover> base top </mover> usually. 
+                 # But stackrel is relation?
+                 # Let's use 'overscript' for now
+                 return ASTNode(node_type="overscript", children=[
+                     self._parse_expression(bottom),
+                     self._parse_expression(top)
+                 ])
+        
+        # Text/Styles
+        # \mathrm{...}, \mathbf{...}, \text{...}
+        # token format from tokenize is command{content}
+        if token.startswith('\\') and '{' in token and token.endswith('}'):
+             # Extract command and content
+             idx = token.find('{')
+             cmd = token[:idx]
+             content = token[idx+1:-1]
+             
+             if cmd in [r'\text', r'\mbox', r'\mathrm', r'\mathbf', r'\mathcal', r'\mathbb', r'\operatorname']:
+                 return ASTNode(node_type="text", value=content, attributes={"variant": cmd[1:]})
+        
+        # Subscript
+        if token.startswith('_'):
+             content = self._extract_braced_content(token[1:])
+             # Subscript needs a base? AST usually handles post-fix or tree. 
+             # If we return a subscript node here, parent needs to attach it to previous.
+             # This simple parser creates a flat list. The post-processor or ASTToMathML needs to handle attaching.
+             return ASTNode(node_type="subscript", children=[self._parse_expression(content)])
+             
+        # Superscript
+        if token.startswith('^'):
+             content = self._extract_braced_content(token[1:])
+             return ASTNode(node_type="superscript", children=[self._parse_expression(content)])
+             
+        # Symbol/Operator
+        return ASTNode(node_type="symbol", value=token)

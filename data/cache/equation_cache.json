@@ -1,0 +1,10 @@
+{
+  "68fe761dfe303b22ea5162c92190c544e6e8e9f7": {
+    "latex": "Y_j[t] = \\sum_{i \\in \\mathcal{I}(j)} h_{i,j}[t] X_i[t] + Z_j[t],",
+    "mathml": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"block\"><mrow><msub><mi>Y</mi><mi>j</mi></msub><mo>[</mo><mi>t</mi><mo>]</mo><mo>=</mo><munder accent=\"false\"><mo>\u2211</mo><mrow><mi>i</mi><mo>\u2208</mo><mstyle mathvariant=\"script\"><mi>I</mi></mstyle><mo>(</mo><mi>j</mi><mo>)</mo></mrow></munder><msub><mi>h</mi><mrow><mi>i</mi><mo>,</mo><mi>j</mi></mrow></msub><mo>[</mo><mi>t</mi><mo>]</mo><msub><mi>X</mi><mi>i</mi></msub><mo>[</mo><mi>t</mi><mo>]</mo><mo>+</mo><msub><mi mathvariant=\"double-struck\">Z</mi><mi>j</mi></msub><mo>[</mo><mi>t</mi><mo>]</mo><mo>,</mo></mrow></math>",
+    "is_valid": true,
+    "timestamp": 1767891034.4317713,
+    "hash": "68fe761dfe303b22ea5162c92190c544e6e8e9f7",
+    "corruption_score": 0.0
+  }
+}

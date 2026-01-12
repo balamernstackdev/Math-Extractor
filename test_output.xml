@@ -1,0 +1,15 @@
+--- Case 1 ---
+LaTeX: s=1 \\ \le \\ d=1
+MathML Output:
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>s</mi><mo>=</mo><mn>1</mn><mo>\ </mo><mo>≤</mo><mo>\ </mo><mi>d</mi><mo>=</mo><mn>1</mn></mrow></math>
+
+--- Case 2 ---
+LaTeX: \begin{align} s=1 \\ \le \\ d=1 \end{align}
+MathML Output:
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtable><mtr><mtd><mrow><mi>s</mi><mo>&#x0003D;</mo><mn>1</mn><mtext>&#x000A0;</mtext><mo>&#x02264;</mo><mtext>&#x000A0;</mtext><mi>d</mi><mo>&#x0003D;</mo><mn>1</mn></mrow></mtd></mtr></mtable></math>
+
+--- Case 3 ---
+LaTeX: x = 1 \\ y = 2
+MathML Output:
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>x</mi><mo>=</mo><mn>1</mn><mo>\ </mo><mi>y</mi><mo>=</mo><mn>2</mn></mrow></math>
+

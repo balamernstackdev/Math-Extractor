@@ -8,6 +8,7 @@ from PyQt6 import QtCore, QtWidgets
 
 from core.config import settings
 from core.logger import logger
+from ui.styles import Theme
 
 
 class SettingsDialog(QtWidgets.QDialog):
@@ -17,35 +18,35 @@ class SettingsDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setMinimumWidth(500)
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #2b2b2b;
-            }
-            QLabel {
-                color: white;
-            }
-            QLineEdit {
-                background-color: #3c3c3c;
-                color: white;
-                border: 1px solid #555;
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {Theme.BACKGROUND};
+            }}
+            QLabel {{
+                color: {Theme.TEXT_PRIMARY};
+            }}
+            QLineEdit {{
+                background-color: {Theme.SURFACE};
+                color: {Theme.TEXT_PRIMARY};
+                border: 1px solid {Theme.BORDER};
                 border-radius: 4px;
                 padding: 8px;
-            }
-            QPushButton {
-                background-color: #0078d4;
-                color: white;
+            }}
+            QPushButton {{
+                background-color: {Theme.ACCENT};
+                color: {Theme.ACCENT_TEXT};
                 padding: 8px 16px;
                 border-radius: 4px;
                 font-weight: bold;
                 border: none;
-            }
-            QPushButton:hover {
-                background-color: #106ebe;
-            }
-            QPushButton:disabled {
-                background-color: #3c3c3c;
-                color: #888;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {Theme.ACCENT_HOVER};
+            }}
+            QPushButton:disabled {{
+                background-color: {Theme.BORDER};
+                color: {Theme.TEXT_TERTIARY};
+            }}
         """)
         
         self.config_file = settings.data_dir / "config.json"
@@ -58,7 +59,7 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Title
         title = QtWidgets.QLabel("Settings")
-        title.setStyleSheet("font-size: 20px; font-weight: bold; color: white;")
+        title.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {Theme.TEXT_PRIMARY};")
         layout.addWidget(title)
         
         # Tesseract OCR Section
@@ -67,13 +68,13 @@ class SettingsDialog(QtWidgets.QDialog):
         tesseract_layout.setSpacing(8)
         
         tesseract_label = QtWidgets.QLabel("Tesseract OCR Path")
-        tesseract_label.setStyleSheet("font-weight: bold; color: #aaa;")
+        tesseract_label.setStyleSheet(f"font-weight: bold; color: {Theme.TEXT_SECONDARY};")
         tesseract_layout.addWidget(tesseract_label)
         
         tesseract_info = QtWidgets.QLabel(
             "Select the path to tesseract.exe. If not set, the application will try to auto-detect it."
         )
-        tesseract_info.setStyleSheet("color: #888; font-size: 11px;")
+        tesseract_info.setStyleSheet(f"color: {Theme.TEXT_TERTIARY}; font-size: 11px;")
         tesseract_info.setWordWrap(True)
         tesseract_layout.addWidget(tesseract_info)
         
@@ -95,7 +96,7 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Status label
         self.tesseract_status = QtWidgets.QLabel("")
-        self.tesseract_status.setStyleSheet("color: #888; font-size: 11px;")
+        self.tesseract_status.setStyleSheet(f"color: {Theme.TEXT_TERTIARY}; font-size: 11px;")
         self._update_tesseract_status()
         tesseract_layout.addWidget(self.tesseract_status)
         
@@ -112,10 +113,10 @@ class SettingsDialog(QtWidgets.QDialog):
         button_layout.addWidget(cancel_btn)
         
         save_btn = QtWidgets.QPushButton("Save")
-        save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #0078d4;
-            }
+        save_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {Theme.ACCENT};
+            }}
         """)
         save_btn.clicked.connect(self._save_settings)
         button_layout.addWidget(save_btn)
@@ -142,19 +143,19 @@ class SettingsDialog(QtWidgets.QDialog):
         path = self.tesseract_path_edit.text().strip()
         if not path:
             self.tesseract_status.setText("Status: Will use auto-detection")
-            self.tesseract_status.setStyleSheet("color: #888; font-size: 11px;")
+            self.tesseract_status.setStyleSheet(f"color: {Theme.TEXT_TERTIARY}; font-size: 11px;")
             return
         
         tesseract_path = Path(path)
         if tesseract_path.exists() and tesseract_path.name.lower() == "tesseract.exe":
             self.tesseract_status.setText("✓ Valid Tesseract path")
-            self.tesseract_status.setStyleSheet("color: #4CAF50; font-size: 11px;")
+            self.tesseract_status.setStyleSheet(f"color: {Theme.SUCCESS}; font-size: 11px;")
         elif tesseract_path.exists():
             self.tesseract_status.setText("⚠ File exists but may not be Tesseract")
-            self.tesseract_status.setStyleSheet("color: #FFA500; font-size: 11px;")
+            self.tesseract_status.setStyleSheet(f"color: {Theme.WARNING}; font-size: 11px;")
         else:
             self.tesseract_status.setText("✗ File not found")
-            self.tesseract_status.setStyleSheet("color: #f44336; font-size: 11px;")
+            self.tesseract_status.setStyleSheet(f"color: {Theme.ERROR}; font-size: 11px;")
 
     def _save_settings(self) -> None:
         """Save settings to config file."""

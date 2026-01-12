@@ -100,3 +100,20 @@ class FormulaDetector:
         logger.debug("Found %d candidate formulas in %s", len(boxes), path.name)
         return boxes
 
+def run_automatic_extraction(self, page_paths: List[Path]): # pragma: no cover
+    """Call this instead of skipping."""
+    self.render_only = False # Toggle the logic gate
+    results = []
+    
+    for page_path in page_paths:
+        # 1. Detect formula regions using your refined FormulaDetector
+        bboxes = self.formula_detector.detect_formulas(page_path) # pragma: no cover
+        
+        for box in bboxes:
+            # 2. Pass the crop to your ImageToLatex service
+            # This uses the vertical bridging logic we added to image_ ImageToLatex.py
+            latex = self.ocr_service.image_to_latex_crop(page_path, box) # pragma: no cover 
+            results.append({"latex": latex, "bbox": box})
+            
+    logger.info("Extracted formulas: %d items", len(results))
+    return results

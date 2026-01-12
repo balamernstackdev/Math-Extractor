@@ -1,0 +1,5 @@
+--- ALIGN ---
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mtable columnalign="right left" rowspacing="0.5ex" columnspacing="1em"><mtr><mtd><mrow><mi>a</mi></mrow></mtd><mtd><mrow><mo>=</mo><mi>b</mi></mrow></mtd></mtr><mtr><mtd><mrow><mi>c</mi></mrow></mtd><mtd><mrow><mo>=</mo><mi>d</mi></mrow></mtd></mtr></mtable></mrow></math>
+
+--- TAG ---
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>x</mi><mo>+</mo><mi>y</mi><mo>=</mo><mi>z</mi><mtext>(1.1)</mtext></mrow></math>

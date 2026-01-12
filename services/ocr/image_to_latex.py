@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional
+import re
 
 import pytesseract
 from PIL import Image, ImageOps
@@ -10,6 +11,41 @@ from PIL import Image, ImageOps
 from core.config import settings
 from core.logger import logger
 from utils.image_utils import load_image
+import os
+import sys
+import logging
+import tempfile
+
+# SETUP ROBUST FILE LOGGER FOR EXE DEBUGGING
+# This bypasses all project logging to ensure we catch mistakes
+try:
+    # Try to write to CWD first, fallback to TEMP
+    log_filename = "mathpix_debug.log"
+    log_path = os.path.join(os.getcwd(), log_filename)
+    
+    # Check if we can write to CWD
+    try:
+        with open(log_path, 'a') as f:
+            pass
+    except PermissionError:
+        log_path = os.path.join(tempfile.gettempdir(), log_filename)
+
+    file_handler = logging.FileHandler(log_path, mode='w', encoding='utf-8')
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    
+    # Create specific logger
+    debug_logger = logging.getLogger("mathpix_exe_debug")
+    debug_logger.setLevel(logging.DEBUG)
+    debug_logger.addHandler(file_handler)
+    debug_logger.info(f"=== MATHPIX DEBUG LOGGER STARTED (Log Path: {log_path}) ===")
+except Exception:
+    debug_logger = None
+
+def log_debug(msg):
+    if debug_logger:
+        debug_logger.info(msg)
+    # Also log to main logger just in case
+    logger.debug(f"[EXE_DEBUG] {msg}")
 
 
 def normalize_ocr_latex(text: str, logger) -> str:
@@ -88,6 +124,11 @@ def normalize_ocr_latex(text: str, logger) -> str:
             "alpha": "\\alpha", "beta": "\\beta", "gamma": "\\gamma",
             "delta": "\\delta", "theta": "\\theta", "lambda": "\\lambda",
             "mu": "\\mu", "pi": "\\pi", "sigma": "\\sigma", "phi": "\\phi",
+            "kappa": "\\kappa", "nu": "\\nu", "xi": "\\xi", "eta": "\\eta",
+            "rho": "\\rho", "tau": "\\tau", "upsilon": "\\upsilon", "chi": "\\chi", "psi": "\\psi",
+            "left": "\\left", "right": "\\right",
+            "sum": "\\sum", "int": "\\int",
+                            
         }
         for k, v in greek_map.items():
             text = re.sub(rf"\b{k}\b", v, text, flags=re.IGNORECASE)
@@ -111,37 +152,249 @@ class ImageToLatex:
     def _initialize_math_ocr(self) -> None:
         """Initialize math-specific OCR (pix2tex) for better formula recognition."""
         try:
-            from pix2tex.cli import LatexOCR
-            import sys
+            # CRITICAL: Set environment variables BEFORE importing heavy libs
+            # This prevents permission errors when libraries try to write to cache
+            import tempfile
             import os
             
-            # Handle PyInstaller executable path resolution
-            if getattr(sys, 'frozen', False):
-                # Running as executable - ensure pix2tex can find models
-                base_path = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.dirname(sys.executable)
-                logger.info(f"[pix2tex] Running as executable, base_path: {base_path}")
-                
-                # Set environment variable for pix2tex cache if needed
-                cache_dir = os.path.expanduser('~/.cache/pix2tex')
-                if not os.path.exists(cache_dir):
-                    # Try to use bundled models
-                    bundled_cache = os.path.join(base_path, '.cache', 'pix2tex')
-                    if os.path.exists(bundled_cache):
-                        os.environ['PIX2TEX_CACHE'] = bundled_cache
-                        logger.info(f"[pix2tex] Using bundled cache: {bundled_cache}")
+            temp_dir = tempfile.gettempdir()
+            os.environ["TOKENIZERS_PARALLELISM"] = "false" # Prevent deadlocks
+            os.environ["HF_HOME"] = os.path.join(temp_dir, "huggingface") 
+            os.environ["TORCH_HOME"] = os.path.join(temp_dir, "torch")
+            os.environ["TIMM_CACHE"] = os.path.join(temp_dir, "timm")
             
-            self.math_ocr = LatexOCR()
+            log_debug(f"Initializing Math OCR in: {os.getcwd()}")
+            log_debug(f"Temp dir: {temp_dir}")
+            
+            # DEBUG: Check critical dependencies explicitly
+            try:
+                import timm
+                log_debug(f"Dependency check: timm imported successfully (version: {getattr(timm, '__version__', 'unknown')})")
+            except ImportError as e:
+                log_debug(f"Dependency check: FAILED to import timm: {e}")
+                raise e # Re-raise to trigger fallback
+            
+            try:
+                import einops
+                log_debug(f"Dependency check: einops imported successfully")
+            except ImportError as e:
+                log_debug(f"Dependency check: FAILED to import einops: {e}")
+                raise e
+
+            try:
+                import torchvision
+                log_debug(f"Dependency check: torchvision imported successfully")
+            except ImportError as e:
+                log_debug(f"Dependency check: FAILED to import torchvision: {e}")
+                # Don't raise, might work without it?
+
+            # PRE-IMPORT Transformers to ensure it works
+            try:
+                import transformers
+                log_debug(f"Dependency check: transformers imported successfully")
+            except ImportError as e:
+                log_debug(f"Dependency check: FAILED to import transformers: {e}")
+                raise e
+
+            from pix2tex.cli import LatexOCR
+            import munch
+            from utils.resource_utils import get_resource_path
+            
+            # Check for bundled model files (explicit bundle strategy)
+            bundled_model_dir = get_resource_path("pix2tex_model")
+            log_debug(f"Checking for bundled models at: {bundled_model_dir}")
+            
+            weights_path = os.path.join(bundled_model_dir, "weights.pth")
+            config_path = os.path.join(bundled_model_dir, "config.yaml")
+            tokenizer_path = os.path.join(bundled_model_dir, "tokenizer.json")
+            resizer_path = os.path.join(bundled_model_dir, "image_resizer.pth")
+            
+            log_debug(f"Weights exists: {os.path.exists(weights_path)} ({weights_path})")
+            
+            if os.path.exists(weights_path) and os.path.exists(config_path):
+                logger.info(f"[pix2tex] Found bundled model at: {bundled_model_dir}")
+                log_debug("Loading bundled model...")
+                
+                # CRITICAL FIX FOR EXE:
+                # pix2tex's LatexOCR overwrites CLI arguments with values from config.yaml!
+                # Since config.yaml contains relative paths (e.g. "dataset/tokenizer.json"), 
+                # this breaks in the frozen app where CWD is different.
+                # We must create a temporary config file with ABSOLUTE paths.
+                import yaml
+                try:
+                    with open(config_path, 'r') as f:
+                        config_data = yaml.safe_load(f)
+                    
+                    # Force absolute paths in config
+                    config_data['tokenizer'] = str(tokenizer_path)
+                    # Also update valid/test data paths to avoid other errors
+                    config_data['data'] = str(os.path.join(bundled_model_dir, "data_dummy.pkl")) 
+                    config_data['valdata'] = str(os.path.join(bundled_model_dir, "val_dummy.pkl"))
+                    
+                    log_debug(f"Config data patch: tokenizer -> {config_data['tokenizer']}")
+                    
+                    # Verify tokenizer file actually exists and is readable
+                    if os.path.exists(tokenizer_path):
+                        try:
+                            with open(tokenizer_path, 'r', encoding='utf-8') as tf:
+                                head = tf.read(100)
+                                log_debug(f"Tokenizer file check OK. Head: {head}...")
+                        except Exception as te:
+                            log_debug(f"Tokenizer file read FAILED: {te}")
+                    else:
+                        log_debug(f"Tokenizer file MISSING at: {tokenizer_path}")
+
+                    # Create temp config
+                    fd, temp_config_path = tempfile.mkstemp(suffix=".yaml", text=True)
+                    with os.fdopen(fd, 'w') as f:
+                        yaml.dump(config_data, f)
+                    
+                    log_debug(f"Created temp config at: {temp_config_path}")
+                    
+                    # Log the actual temp config content for verification
+                    try:
+                        with open(temp_config_path, 'r') as f:
+                            temp_config_content = f.read()
+                            log_debug(f"Temp config content:\n{temp_config_content}")
+                    except Exception as e:
+                        log_debug(f"Could not read temp config: {e}")
+                    
+                    args = munch.Munch({
+                        'config': temp_config_path,
+                        'checkpoint': weights_path,
+                        'no_cuda': True,
+                        'no_resize': False,
+                        'tokenizer': tokenizer_path,
+                        'image_resizer': resizer_path if os.path.exists(resizer_path) else None,
+                    })
+                    
+                    log_debug(f"Initializing LatexOCR with args: tokenizer={args.tokenizer}, checkpoint={args.checkpoint}")
+                    self.math_ocr = LatexOCR(arguments=args)
+                    
+                    # Verify what tokenizer path LatexOCR actually loaded
+                    if hasattr(self.math_ocr, 'args') and hasattr(self.math_ocr.args, 'tokenizer'):
+                        log_debug(f"LatexOCR loaded tokenizer from: {self.math_ocr.args.tokenizer}")
+                    
+                    log_debug(f"LatexOCR initialization SUCCESS. Model config: {self.math_ocr.args if hasattr(self.math_ocr, 'args') else 'unknown'}")
+                    
+                    # CRITICAL FIX: Force-reload tokenizer to fix garbage output in EXE
+                    # pix2tex might be loading a cached/wrong tokenizer despite our config
+                    try:
+                        log_debug("Attempting to force-reload tokenizer...")
+                        from tokenizers import Tokenizer
+                        
+                        # Load tokenizer directly from our bundled file
+                        forced_tokenizer = Tokenizer.from_file(str(tokenizer_path))
+                        log_debug(f"Force-loaded tokenizer from: {tokenizer_path}")
+                        log_debug(f"Forced tokenizer vocab size: {forced_tokenizer.get_vocab_size()}")
+                        
+                        # Replace pix2tex's tokenizer with our correctly loaded one
+                        if hasattr(self.math_ocr, 'tokenizer'):
+                            old_vocab_size = len(self.math_ocr.tokenizer.get_vocab()) if hasattr(self.math_ocr.tokenizer, 'get_vocab') else 'unknown'
+                            log_debug(f"Replacing pix2tex tokenizer (old vocab size: {old_vocab_size})")
+                            self.math_ocr.tokenizer = forced_tokenizer
+                            log_debug("Tokenizer force-reload SUCCESS")
+                        else:
+                            log_debug("WARNING: math_ocr has no tokenizer attribute to replace!")
+                            
+                    except Exception as tokenizer_reload_error:
+                        log_debug(f"Tokenizer force-reload FAILED: {tokenizer_reload_error}")
+                        # Continue anyway - maybe the original tokenizer works
+                    
+                    # Cleanup temp config
+                    try:
+                        os.unlink(temp_config_path)
+                    except Exception:
+                        pass
+                        
+                except Exception as config_exc:
+                    log_debug(f"Failed to create temp config: {config_exc}. Falling back to default.")
+                    # Fallback to original method (might fail)
+                    args = munch.Munch({
+                        'config': config_path,
+                        'checkpoint': weights_path,
+                        'tokenizer': tokenizer_path,
+                        'no_cuda': True,
+                        'no_resize': False,
+                        'image_resizer': resizer_path if os.path.exists(resizer_path) else None,
+                    })
+                    self.math_ocr = LatexOCR(arguments=args)
+
+            else:
+                log_debug("Bundled model NOT found. Attempting fallback...")
+                # Fallback to default behavior (user cache or package data)
+                if getattr(sys, 'frozen', False):
+                    # Trying to find it in implicit package bundle (PyInstaller _internal)
+                    # For --onedir, sys._MEIPASS might look different or not be set directly
+                    pass 
+                
+                self.math_ocr = LatexOCR()
+
             self.has_math_ocr = True
             logger.info("Math OCR (pix2tex) initialized successfully")
-        except ImportError:
+            
+        except ImportError as ie:
+            log_msg = f"ImportError during initialization: {ie}"
+            log_debug(log_msg)
+            self._write_debug_file("ocr_import_error.txt", log_msg)
+            
             logger.warning(
-                "pix2tex not available. Install with: pip install pix2tex[api]\n"
-                "Falling back to Tesseract (not recommended for math formulas)"
+                "pix2tex not available. Falling back to Tesseract."
             )
             self.has_math_ocr = False
+            
         except Exception as exc:  # noqa: BLE001
-            logger.exception("Failed to initialize pix2tex: %s. Using Tesseract fallback", exc)
+            import traceback
+            tb = traceback.format_exc()
+            log_msg = f"CRITICAL ERROR initializing pix2tex: {exc}\n{tb}"
+            log_debug(log_msg)
+            self._write_debug_file("ocr_critical_error.txt", log_msg)
+            
+            logger.exception("Failed to initialize pix2tex. Using Tesseract fallback")
             self.has_math_ocr = False
+
+    def _write_debug_file(self, filename, content):
+        """Write debug info to user home/temp to ensure visibility."""
+        import os
+        import tempfile
+        
+        # Try temp dir first
+        try:
+            path = os.path.join(tempfile.gettempdir(), filename)
+            with open(path, "w") as f:
+                f.write(content)
+            return
+        except Exception:
+            pass
+            
+        # Try home dir
+        try:
+            path = os.path.join(os.path.expanduser("~"), filename)
+            with open(path, "w") as f:
+                f.write(content)
+        except Exception:
+            pass
+
+
+    def warm_up(self):
+        """Warm up the OCR models with a dummy image to avoid cold-start lag."""
+        if not self.has_math_ocr:
+            return
+        
+        try:
+            import numpy as np
+            from PIL import Image
+            logger.info("[OCR] Warming up models...")
+            # Create a larger 100x100 image with non-uniform pixels
+            # pix2tex/OpenCV can fail on empty/solid images during normalization
+            dummy_img = Image.new('RGB', (100, 100), color='white')
+            dummy_img.putpixel((0, 0), (0, 0, 0)) # Add one black pixel to ensure data.max() != data.min()
+            
+            # First call warms up the PyTorch model
+            self.math_ocr(dummy_img)
+            logger.info("[OCR] Warm-up complete")
+        except Exception as e:
+            logger.warning(f"[OCR] Warm-up failed: {e}")
     
     def _initialize_tesseract(self) -> None:
         """Initialize Tesseract path from settings."""
@@ -160,19 +413,42 @@ class ImageToLatex:
             else:
                 logger.warning("Tesseract OCR not found. OCR functionality will not work.")
 
-    def image_to_latex(self, image_path: str | Path) -> str:
-        """Perform OCR on an image and return LaTeX-like text."""
+    def image_to_latex(self, image_path: str | Path, handwriting_mode: bool = False, table_mode: bool = False) -> str:
+        """Perform OCR on an image and return LaTeX-like text.
+        
+        Args:
+            image_path: Path to the image file
+            handwriting_mode: If True, bypass local OCR and force Vision API (better for handwriting)
+            table_mode: If True, bypass local OCR and force Vision API (optimized for tables)
+        """
         path = Path(image_path)
         if not path.exists():
             raise FileNotFoundError(f"OCR image not found: {path}")
         
-        logger.info("OCR on %s", path)
+        logger.info("OCR on %s (Mode: %s)", path, "Handwriting/Vision" if handwriting_mode else "Standard")
         image = load_image(path)
         if image is None:
             raise ValueError(f"Could not open image for OCR: {path}")
         
+        # Determine if we should use local OCR or bypass it
+        # Bypass for handwriting OR tables (vision is much better for both)
+        # ALSO bypass if API key is set - prevents pix2tex Tensor conversion error
+        # (Local pix2tex has tokenizer force-reload issue causing: 'Tensor' object cannot be converted to 'Sequence')
+        from core.config import settings as config_settings
+        has_vision_api = bool(config_settings.openai_api_key)
+        
+        use_local_ocr = (
+            self.has_math_ocr 
+            and not handwriting_mode 
+            and not table_mode
+            and not has_vision_api  # Skip local OCR if Vision API is available
+        )
+        
+        if has_vision_api and not handwriting_mode and not table_mode:
+            logger.info("[OCR] OpenAI API key detected - using Vision API (avoids pix2tex Tensor error)")
+
         # Use math-specific OCR if available (much better for formulas)
-        if self.has_math_ocr:
+        if use_local_ocr:
             try:
                 logger.info("Using pix2tex for math OCR")
                 # pix2tex expects PIL Image
@@ -185,7 +461,25 @@ class ImageToLatex:
                 if pil_image.mode != 'RGB':
                     pil_image = pil_image.convert('RGB')
                 
+                # ACCURACY FIX: Add padding!
+                # pix2tex (ViT) often fails if text touches the border. 
+                # Adding 20-30px white padding improves accuracy significantly.
+                from PIL import ImageOps
+                pil_image = ImageOps.expand(pil_image, border=30, fill='white')
+                
                 latex_result = self.math_ocr(pil_image)
+                
+                # CRITICAL DEBUG: Log the raw output from pix2tex
+                log_debug(f"pix2tex raw output: {latex_result}")
+                log_debug(f"pix2tex output length: {len(latex_result) if latex_result else 0}")
+                log_debug(f"pix2tex output type: {type(latex_result)}")
+                
+                # Check if tokenizer is accessible
+                if hasattr(self.math_ocr, 'tokenizer'):
+                    log_debug(f"Tokenizer vocab size: {len(self.math_ocr.tokenizer.get_vocab()) if hasattr(self.math_ocr.tokenizer, 'get_vocab') else 'unknown'}")
+                else:
+                    log_debug("WARNING: math_ocr has no tokenizer attribute!")
+                
                 logger.info("pix2tex result: %s", latex_result[:100])
                 
                 # Post-process the result
@@ -199,12 +493,86 @@ class ImageToLatex:
                 if processed != before_cleanup:
                     logger.debug("[OCR] After OpenAI cleanup: %s", processed[:100])
                 
-                logger.info("[OCR] Final LaTeX output: %s", processed[:100])
+                # Check if result is clean
+                from services.ocr.pipeline_components import is_semantically_clean_latex
+                is_clean = is_semantically_clean_latex(processed)
+                
+                # Check Turbo Mode DYNAMICALLY (allow user to toggle mid-run)
+                from core.config import settings
+                if settings.turbo_mode:
+                    logger.info("[OCR] [Turbo] Skipping retries and fallbacks (Dynamic Check)")
+                    return processed
+                
+                if is_clean:
+                    logger.info("[OCR] Final LaTeX output: %s", processed[:100])
+                    return processed
+                
+                # SAFETY: Do not 2x scale if the image is already large (prevents CPU hang)
+                if pil_image.width > 800 or pil_image.height > 400:
+                    logger.warning("[OCR] Image already large (%dx%d). Skipping 2x scale.", pil_image.width, pil_image.height)
+                else:
+                    logger.warning("[OCR] Corrupted/truncated. Retrying with 2x scaling...")
+                    scaled_image = pil_image.resize(
+                        (pil_image.width * 2, pil_image.height * 2), 
+                        Image.Resampling.LANCZOS
+                    )
+                    retry_latex = self.math_ocr(scaled_image)
+                    retry_processed = self._post_process_ocr(retry_latex)
+                    if is_semantically_clean_latex(retry_processed):
+                        logger.info("[OCR] ✅ Retry SUCCESSFUL")
+                        return retry_processed
+                    processed = retry_processed
+
+                # FALLBACK: Try GPT-4o Vision
+                logger.warning("[OCR] Attempting GPT-4 Vision Fallback...")
+                vision_result = self._try_openai_vision_fallback(pil_image, table_mode=table_mode, handwriting_mode=handwriting_mode)
+                if vision_result:
+                    logger.info("[OCR] 🤖 Vision successful")
+                    return self._post_process_ocr(vision_result)
+                
                 return processed
             except Exception as exc:  # noqa: BLE001
                 logger.warning("pix2tex failed, falling back to Tesseract: %s", exc)
                 # Fall through to Tesseract
         
+                # Fall through to Tesseract
+        
+        # If Handwriting Mode was active, we skipped the `if use_local_ocr` block above.
+        # So we arrive here. We must ensure we trigger the Vision fallback.
+        
+        if handwriting_mode or table_mode:
+             logger.info("[OCR] Specialized Mode active (Handwriting/Table) - Forcing GPT-4o Vision directly")
+             # Ensure we have a PIL image
+             if isinstance(image, Image.Image):
+                 hw_pil = image
+             else:
+                 hw_pil = Image.fromarray(image)
+             
+             vision_res = self._try_openai_vision_fallback(hw_pil, table_mode=table_mode, handwriting_mode=handwriting_mode)
+             if vision_res:
+                 logger.info("[OCR] 🤖 Vision (Handwriting) successful")
+                 return self._post_process_ocr(vision_res)
+             else:
+                 logger.warning("[OCR] Vision failed in Handwriting Mode. Proceeding to Tesseract.")
+
+        # ------------------------------------------------------------------
+        # FALLBACK: Try GPT-4o Vision BEFORE Tesseract
+        # Tesseract is poor at math; Vision is excellent.
+        # ------------------------------------------------------------------
+        try:
+            # Ensure we have a PIL image
+            if isinstance(image, Image.Image):
+                fallback_pil = image
+            else:
+                fallback_pil = Image.fromarray(image)
+            
+            vision_res = self._try_openai_vision_fallback(fallback_pil)
+            if vision_res:
+                logger.info("[OCR] 🤖 Vision Fallback successful (avoiding Tesseract)")
+                return self._post_process_ocr(vision_res)
+        except Exception as vision_exc:
+            logger.warning("[OCR] Vision fallback check failed: %s", vision_exc)
+
         # Fallback to Tesseract for text or if pix2tex unavailable
         logger.info("Using Tesseract OCR (fallback)")
         
@@ -369,133 +737,35 @@ class ImageToLatex:
         return Image.fromarray(binary)
     
     def _post_process_ocr(self, text: str) -> str:
-        """Post-process OCR output to improve LaTeX conversion."""
-        import re  # Import at the top of the function
+        """
+        Minimal post-processing to preserve OCR fidelity.
         
+        ARCHITECTURAL CHANGE:
+        We no longer do aggressive regex replacements (like sum -> \\sum or alpha -> \\alpha) here.
+        Rationale:
+        1. pix2tex usually produces correct LaTeX tokens.
+        2. "Fixing" logic often corrupts valid input (e.g. variable "alpha" becoming "\alpha").
+        3. Semantic repairs are now handled by the StrictMathpixPipeline's AI layer.
+        """
         if not text or not text.strip():
             logger.warning("OCR returned empty text")
             return r"\text{No text detected}"
         
-        # Remove extra whitespace and normalize
-        text = " ".join(text.split())
+        # Remove extra whitespace (but preserve newlines for structure)
+        # Old: text = " ".join(text.split()) -> flattens newlines
+        import re
+        # Collapse multiple spaces/tabs to single space
+        text = re.sub(r'[ \t]+', ' ', text)
+        # Collapse multiple newlines to single newline
+        text = re.sub(r'\n+', '\n', text)
         text = text.strip()
         
-        # Log what we got from OCR
         logger.debug("Post-processing OCR text: %s", text[:100])
         
-        # Check if LaTeX is already clean before reconstruction
-        # If clean, skip reconstruction to avoid corrupting it
-        original_text = text  # Keep original for comparison
-        try:
-            from services.ocr.strict_pipeline import is_semantically_clean_latex
-            is_clean = is_semantically_clean_latex(text)
-            logger.info("[OCR] Clean LaTeX check: is_clean=%s, text preview: %s", is_clean, text[:80])
-            if is_clean:
-                logger.info("[OCR] ✅ LaTeX is already clean, skipping reconstruction to avoid corruption")
-                # Still do basic cleaning (remove stray characters) but skip reconstruction
-                text = self._clean_ocr_errors(text)
-                logger.info("[OCR] After basic cleaning: %s", text[:80])
-            else:
-                # LaTeX is corrupted - reconstruct it
-                logger.info("[OCR] ⚠️ LaTeX is corrupted, attempting reconstruction")
-                text = self._reconstruct_latex_from_ocr(text)
-                logger.info("[OCR] After reconstruction: %s", text[:80])
-                # Clean OCR errors after reconstruction
-                text = self._clean_ocr_errors(text)
-        except ImportError:
-            # Fallback: if strict_pipeline not available, always reconstruct
-            logger.warning("[OCR] Strict pipeline not available, using reconstruction (may corrupt clean LaTeX)")
-            text = self._reconstruct_latex_from_ocr(text)
-            # Clean OCR errors after reconstruction
-            text = self._clean_ocr_errors(text)
-        except Exception as exc:
-            logger.error("[OCR] Error checking if LaTeX is clean: %s", exc)
-            # On error, skip reconstruction to be safe
-            logger.info("[OCR] Error occurred, skipping reconstruction to avoid corruption")
-            text = self._clean_ocr_errors(original_text)
-        
-        # If it has many uppercase letters in a row or looks like random characters
-        if len(text) > 10:
-            uppercase_ratio = sum(1 for c in text if c.isupper()) / len(text)
-            if uppercase_ratio > 0.7 and not any(c in text for c in "=+-*/()[]{}"):
-                # Likely OCR error - treat as plain text
-                logger.warning("OCR output looks like gibberish: %s", text[:50])
-        
-        # Check if text contains mathematical notation
-        has_math_chars = any(char in text for char in "=+-*/()[]{}^_∑∫∏√≤≥≠≈±×÷")
-        has_numbers = any(char.isdigit() for char in text)
-        
-        # If it's plain text without math symbols, wrap in \text{}
-        if not has_math_chars:
-            # It's regular text, not a formula
-            # Escape special LaTeX characters
-            text_escaped = text.replace("\\", "\\textbackslash")
-            text_escaped = text_escaped.replace("{", "\\{")
-            text_escaped = text_escaped.replace("}", "\\}")
-            text_escaped = text_escaped.replace("$", "\\$")
-            text_escaped = text_escaped.replace("&", "\\&")
-            text_escaped = text_escaped.replace("%", "\\%")
-            text_escaped = text_escaped.replace("#", "\\#")
-            text_escaped = text_escaped.replace("^", "\\textasciicircum")
-            text_escaped = text_escaped.replace("_", "\\_")
-            text_escaped = text_escaped.replace("~", "\\textasciitilde")
-            return f"\\text{{{text_escaped}}}"
-        
-        # Check if LaTeX already has proper commands (like \equiv, \sum, \mathbb)
-        # If so, skip the regex substitutions that might corrupt it
-        has_proper_commands = bool(re.search(r'\\[a-zA-Z]+\{', text) or re.search(r'\\[a-zA-Z]+(?:\[|\{|\(|$)', text))
-        
-        # Has math characters - try to convert to proper LaTeX
-        # BUT: Skip regex substitutions if LaTeX already has proper commands (to avoid corruption)
-        if not has_proper_commands:
-            # Only apply regex substitutions if LaTeX doesn't have proper commands
-            # (This prevents corrupting clean LaTeX from OCR)
-            try:
-                # Fractions: a/b -> \frac{a}{b} (but be careful with dates like 2/3/2024)
-                fraction_pattern = r"(\d+|\w+)/(\d+|\w+)"
-                if re.search(fraction_pattern, text) and not re.search(r"\d+/\d+/\d+", text):
-                    text = re.sub(fraction_pattern, r"\\frac{\1}{\2}", text)
-                
-                # Subscripts: x_i -> x_{i} or x1 -> x_{1}
-                # BUT: Don't match if there's a backslash before (it's a command)
-                subscript_pattern = r"([a-zA-Z])(?<!\\)_?(\d+|[a-zA-Z])"
-                text = re.sub(subscript_pattern, r"\1_{\2}", text)
-                
-                # Superscripts: x^2 -> x^{2} or x2 (if followed by space or end)
-                superscript_pattern = r"(\w+)\^(\d+|\w+)"
-                text = re.sub(superscript_pattern, r"\1^{\2}", text)
-                
-                # Summation: sum -> \sum (use lambda to avoid backreference issues)
-                text = re.sub(r"\bsum\b", lambda m: r"\\sum", text, flags=re.IGNORECASE)
-                
-                # Integrals: int -> \int (use lambda to avoid backreference issues)
-                text = re.sub(r"\bint\b", lambda m: r"\\int", text, flags=re.IGNORECASE)
-                
-                # Greek letters - use lambda to avoid regex backreference issues
-                greek_map = {
-                    "alpha": "\\alpha", "beta": "\\beta", "gamma": "\\gamma",
-                    "delta": "\\delta", "epsilon": "\\epsilon", "theta": "\\theta",
-                    "lambda": "\\lambda", "mu": "\\mu", "pi": "\\pi", "sigma": "\\sigma",
-                    "phi": "\\phi", "omega": "\\omega"
-                }
-                for greek, latex in greek_map.items():
-                    # Use lambda to avoid regex backreference parsing issues
-                    pattern = rf"\b{re.escape(greek)}\b"
-                    text = re.sub(pattern, lambda m, rep=latex: rep, text, flags=re.IGNORECASE)
-            except re.error as regex_err:
-                logger.warning("Regex error during post-processing: %s. Text: %s", regex_err, text[:100])
-                # Return text as-is if regex fails
-                pass
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Error during post-processing: %s. Text: %s", exc, text[:100])
-                # Return text as-is if processing fails
-                pass
-        else:
-            logger.info("[OCR] LaTeX has proper commands, skipping regex substitutions to avoid corruption")
-        
-        # Wrap in math mode if not already LaTeX command
-        if not text.startswith("$") and not text.startswith("\\") and has_math_chars:
-            text = f"${text}$"
+        # Basic filter for obvious gibberish (e.g. extremely long strings with no math symbols)
+        if len(text) > 50 and " " not in text and "\\" not in text:
+             # Long contiguous string without spaces or backslashes is likely garbage
+             logger.warning("OCR output looks like noise (long contiguous string): %s...", text[:20])
         
         return text
     
@@ -617,8 +887,77 @@ class ImageToLatex:
         
         text = "".join(cleaned)
         
-        # Final cleanup: remove multiple spaces
-        text = re.sub(r"\s+", " ", text)
+        # Final cleanup: remove multiple spaces (but preserve explicit structure if needed)
+        # We want to treat newlines as line breaks for multiline equations
+        # 1. Collapse horizontal whitespace
+        text = re.sub(r"[ \t]+", " ", text)
+        
+        # 2. Convert newlines to LaTeX line breaks (double backslash)
+        # But avoid double-double backslashes if already present
+        # Check if we already have \\ followed by newline
+        
+        # Simple approach: Replace \n with \\ if it's not preceded by \\
+        # But first collapse multiple newlines
+        text = re.sub(r"[\r\n]+", "\n", text)
+        
+        # If we are NOT in an environment (simplistic check), we might want to force breaks.
+        # But standard OCR might output:
+        # x = y
+        # a = b
+        # We want: x = y \\ a = b
+        
+        # Replace newline with ' \\ ' ensuring we don't duplicate if already exists
+        lines = text.split('\n')
+        # Filter empty lines
+        lines = [l.strip() for l in lines if l.strip()]
+        
+        lines = [l.strip() for l in lines if l.strip()]
+        
+        # 3. Heuristic: Split before enumeration markers like (i), (ii), (a) if they don't have breaks
+        # This fixes cases where lists of equations are flattened
+        # We process 'text' which is the joined version if we had lines, but here we operate on lines list or reconstructed text?
+        # Let's operate on the text *before* converting newlines-to-breaks finalization, OR after re-joining.
+        # Lines logic above handles explicit newlines. Now let's handle implicit ones in the lines.
+        
+        final_lines = []
+        for line in lines:
+            # Check for missing breaks before (i), (ii), (a), (b)
+            # Regex lookbehind for space, lookahead for marker. Avoid variables like (x).
+            # Markers: (i), (ii), ..., (vi), (a), (b), ... (e)
+            # Use careful regex to replace ` <marker> ` with ` \\ <marker> `
+            # Note: We avoid splitting if it seems to be part of a sentence like "in case (i)"
+            # A simple safe heuristic: If the line is long and contains these markers, split.
+            
+            # Pattern: Space + (marker) + Space/Start of math
+            # We use a substitution.
+            # Markers: roman i-viii, alpha a-e.
+            pattern = r"(?<!\\\\)\s+(\((?:[ivx]{1,4}|[a-e])\))(?=\s|[^a-zA-Z0-9])"
+            # Replace with \\ \1
+            line_processed = re.sub(pattern, r" \\\\ \1", line)
+            
+            final_lines.append(line_processed)
+            
+        lines = final_lines
+
+        # Join with \\ if multiple lines found and no explicit structure detected?
+        # Or just generally join them.
+        if len(lines) > 1:
+            # Check if headers already have \\ at end
+            new_lines = []
+            for i, line in enumerate(lines):
+                 if i < len(lines) - 1 and not line.endswith(r'\\'):
+                     new_lines.append(line + r" \\")
+                 else:
+                     new_lines.append(line)
+            text = " ".join(new_lines)
+        else:
+            text = lines[0] if lines else ""
+
+        # Remove any starting/ending spaces
+        # Fix possible double backslashes from heuristic overlap
+        text = text.replace(r"\\ \\", r"\\")
+        text = text.replace(r"\\\\", r"\\")
+        
         text = text.strip()
         
         return text
@@ -639,6 +978,26 @@ class ImageToLatex:
         # OpenAI semantic rewriting should happen in strict_pipeline.py only
         # This method now returns raw OCR output immediately - no OpenAI calls
         return ocr_text
+
+    def _try_openai_vision_fallback(self, image, table_mode: bool = False, handwriting_mode: bool = False) -> str | None:
+        """
+        FALLBACK: Use GPT-4o Vision when local OCR fails completely.
+        This provides a safety net for complex equations that pix2tex misses.
+        """
+        try:
+            from services.ai.openai_mathml import OpenAIMathMLConverter
+            
+            # Check if API key is available (it's loaded in OpenAIMathMLConverter)
+            import os
+            if not os.getenv("OPENAI_API_KEY"):
+                return None
+                
+            converter = OpenAIMathMLConverter()
+            return converter.convert_image_to_latex(image, table_mode=table_mode, handwriting_mode=handwriting_mode)
+        except ImportError:
+            return None
+        except Exception:
+            return None
     
     def _is_corrupted_ocr_output(self, text: str) -> bool:
         """Detect if OCR output is corrupted (has shredded patterns)."""
@@ -660,8 +1019,40 @@ class ImageToLatex:
                 return True
         
         # Check for many single-letter subscripts in a row (indicates corruption)
-        if re.search(r'[a-z]_\{[a-z]\}[a-z]_\{[a-z]\}[a-z]_\{[a-z]\}', text):
-            return True
+
+    def _calculate_basic_quality(self, latex: str) -> float:
+        """
+        Calculate a basic quality score for LaTeX to choose between attempts.
+        Higher is better.
+        """
+        score = 0
+        if not latex:
+            return -100
+            
+        # 1. Balance check (most important)
+        open_braces = latex.count('{')
+        close_braces = latex.count('}')
+        if open_braces == close_braces:
+            score += 50
+        else:
+            score -= abs(open_braces - close_braces) * 5
+            
+        left_count = latex.count(r'\left')
+        right_count = latex.count(r'\right')
+        if left_count == right_count:
+            score += 30
+        else:
+            score -= abs(left_count - right_count) * 10
+            
+        # 2. End validity
+        if latex.strip().endswith('}'):
+            score += 10
+        if latex.strip().endswith(('\\', '_', '^')):
+            score -= 20
+            
+        # 3. Length (heuristic: longer is often better if not noise)
+        score += min(len(latex) / 10, 20)
         
-        return False
+        return score
+
 

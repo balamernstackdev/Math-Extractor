@@ -1,0 +1,97 @@
+﻿
+services\ocr\strict_pipeli
+ne.py:159:    def 
+process_mathml(self, 
+mathml: str) -> 
+StrictPipelineResult:
+services\ocr\strict_pipeli
+ne.py:177:            
+return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:219:            
+return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:242:            
+return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:286:                
+    return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:437:                
+        return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:454:                
+return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:469:                
+return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:494:            
+return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:508:            
+return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:544:    def 
+process_latex(self, 
+latex: str) -> 
+StrictPipelineResult:
+services\ocr\strict_pipeli
+ne.py:550:            
+return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:563:            # 
+But StrictPipelineResult 
+is a dict (TypedDict).
+services\ocr\strict_pipeli
+ne.py:748:                
+                return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:768:                
+                return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:797:                
+                    
+return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:812:                
+                return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:905:                
+    return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:1085:            
+return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:1222:               
+     return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:1282:               
+          return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:1332:               
+     return 
+StrictPipelineResult(
+services\ocr\strict_pipeli
+ne.py:1448:        result 
+= StrictPipelineResult(
+
+

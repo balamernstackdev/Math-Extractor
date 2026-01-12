@@ -36,33 +36,47 @@ except ImportError:
     pass    
 
 def _find_poppler_path() -> Path | None:
-    """Auto-detect Poppler installation path on Windows."""
-    # Check environment variable first
+    """
+    Auto-detect Poppler path with PyInstaller support.
+
+    Priority:
+    1. Bundled Poppler (PyInstaller EXE)
+    2. Environment variable POPPLER_PATH
+    3. System installations (WinGet / Program Files)
+    """
+
+    # 1️⃣ PyInstaller bundled poppler
+    if getattr(sys, "frozen", False):
+        base = Path(sys._MEIPASS)
+        bundled = base / "poppler" / "bin"
+        if bundled.exists() and (bundled / "pdftoppm.exe").exists():
+            return bundled
+
+    # 2️⃣ Environment variable
     if env_path := os.getenv("POPPLER_PATH"):
         path = Path(env_path)
         if path.exists() and (path / "pdftoppm.exe").exists():
             return path
-    
-    # Check common Windows installation locations
+
+    # 3️⃣ WinGet installation
     local_appdata = os.getenv("LOCALAPPDATA")
     if local_appdata:
-        # WinGet installation path
-        winget_path = Path(local_appdata) / "Microsoft" / "WinGet" / "Packages"
-        if winget_path.exists():
-            for poppler_dir in winget_path.glob("*poppler*"):
-                # Search for poppler-*/Library/bin pattern
+        winget_root = Path(local_appdata) / "Microsoft" / "WinGet" / "Packages"
+        if winget_root.exists():
+            for poppler_dir in winget_root.glob("*poppler*"):
                 for match in poppler_dir.glob("poppler-*/Library/bin"):
                     if (match / "pdftoppm.exe").exists():
                         return match
-    
-    # Check Program Files
-    for program_files in [os.getenv("ProgramFiles"), os.getenv("ProgramFiles(x86)")]:
-        if program_files:
-            poppler_path = Path(program_files) / "poppler" / "Library" / "bin"
-            if poppler_path.exists() and (poppler_path / "pdftoppm.exe").exists():
-                return poppler_path
-    
+
+    # 4️⃣ Program Files fallback
+    for pf in (os.getenv("ProgramFiles"), os.getenv("ProgramFiles(x86)")):
+        if pf:
+            candidate = Path(pf) / "poppler" / "Library" / "bin"
+            if candidate.exists() and (candidate / "pdftoppm.exe").exists():
+                return candidate
+
     return None
+
 
 
 def _find_tesseract_path() -> str | None:
@@ -118,6 +132,7 @@ class Settings:
     data_dir: Path = base_dir / "data"
     uploads_dir: Path = data_dir / "uploads"
     snips_dir: Path = data_dir / "snips"
+    cache_dir: Path = data_dir / "cache"
     notes_dir: Path = data_dir / "notes"
     # Default to 0.0.0.0 for web deployment (Render, Railway, etc.)
     # Use 127.0.0.1 only if explicitly set for local development
@@ -138,6 +153,9 @@ class Settings:
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")    
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")    
     use_openai_fallback: bool = os.getenv("USE_OPENAI_FALLBACK", "false").lower() == "true"
+    # Performance: Fast mode skips OpenAI for low-corruption equations
+    use_ast_pipeline: bool = os.getenv("USE_AST_PIPELINE", "false").lower() == "true"
+    turbo_mode: bool = os.getenv("TURBO_MODE", "false").lower() == "true"
 
 
 settings = Settings()

@@ -1,0 +1,37 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.13.7, pytest-8.3.3, pluggy-1.6.0
+rootdir: D:\test-r&d\mathpix_clone
+plugins: anyio-4.12.0, cov-7.0.0
+collected 200 items / 3 errors
+
+=================================== ERRORS ====================================
+______________________ ERROR collecting test_output.txt _______________________
+C:\Program Files\Python313\Lib\pathlib\_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+C:\Program Files\Python313\Lib\pathlib\_abc.py:633: in read_text
+    return f.read()
+<frozen codecs>:325: in decode
+    ???
+E   UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte
+______________________ ERROR collecting test_results.txt ______________________
+C:\Program Files\Python313\Lib\pathlib\_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+C:\Program Files\Python313\Lib\pathlib\_abc.py:633: in read_text
+    return f.read()
+<frozen codecs>:325: in decode
+    ???
+E   UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte
+______________________ ERROR collecting tests_final.txt _______________________
+C:\Program Files\Python313\Lib\pathlib\_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+C:\Program Files\Python313\Lib\pathlib\_abc.py:633: in read_text
+    return f.read()
+<frozen codecs>:325: in decode
+    ???
+E   UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte
+=========================== short test summary info ===========================
+ERROR test_output.txt - UnicodeDecodeError: 'utf-8' codec can't decode byte 0...
+ERROR test_results.txt - UnicodeDecodeError: 'utf-8' codec can't decode byte ...
+ERROR tests_final.txt - UnicodeDecodeError: 'utf-8' codec can't decode byte 0...
+!!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!
+============================= 3 errors in 13.31s ==============================

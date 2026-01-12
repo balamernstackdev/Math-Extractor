@@ -7,14 +7,66 @@ from typing import List, Optional
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 
+class ClickableFormulaBoxSignals(QtCore.QObject):
+    """Signal holder for ClickableFormulaBox (QGraphicsItem can't have signals directly)."""
+    formula_clicked = QtCore.pyqtSignal(Path, dict)
+    formula_context_menu = QtCore.pyqtSignal(Path, dict, QtCore.QPoint)
+    region_updated = QtCore.pyqtSignal(Path, dict) # Path, new_bbox
+
+
+class ResizeHandle(QtWidgets.QGraphicsRectItem):
+    """Small handles for resizing the bounding box."""
+    def __init__(self, position_name: str, parent: ClickableFormulaBox):
+        super().__init__(QtCore.QRectF(-4, -4, 8, 8), parent)
+        self.position_name = position_name
+        self.parent_box = parent
+        self.setBrush(QtGui.QBrush(QtGui.QColor(0, 120, 212)))
+        self.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
+        self.setCursor(self._get_cursor())
+        self.setAcceptHoverEvents(True)
+        self.setVisible(False)
+        self.setZValue(10)
+        self._is_dragging = False
+
+    def _get_cursor(self) -> QtCore.Qt.CursorShape:
+        mapping = {
+            "tl": QtCore.Qt.CursorShape.SizeFDiagCursor, "tr": QtCore.Qt.CursorShape.SizeBDiagCursor,
+            "bl": QtCore.Qt.CursorShape.SizeBDiagCursor, "br": QtCore.Qt.CursorShape.SizeFDiagCursor,
+            "tc": QtCore.Qt.CursorShape.SizeVerCursor, "bc": QtCore.Qt.CursorShape.SizeVerCursor,
+            "ml": QtCore.Qt.CursorShape.SizeHorCursor, "mr": QtCore.Qt.CursorShape.SizeHorCursor
+        }
+        return mapping.get(self.position_name, QtCore.Qt.CursorShape.ArrowCursor)
+
+    def mousePressEvent(self, event: QtWidgets.QGraphicsSceneMouseEvent):
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            self._is_dragging = True
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QtWidgets.QGraphicsSceneMouseEvent):
+        if self._is_dragging:
+            self.parent_box.handle_resize(self.position_name, event.pos())
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QtWidgets.QGraphicsSceneMouseEvent):
+        if self._is_dragging:
+            self._is_dragging = False
+            self.parent_box.finish_resize()
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+
 class ClickableFormulaBox(QtWidgets.QGraphicsRectItem):
     """A clickable bounding box for formulas that shows context menu on right-click."""
     
-    formula_clicked = QtCore.pyqtSignal(Path, dict)  # Emit when formula is clicked
-    formula_context_menu = QtCore.pyqtSignal(Path, dict, QtCore.QPoint)  # Emit for context menu
-    
     def __init__(self, image_path: Path, bbox: dict, parent: Optional[QtWidgets.QGraphicsItem] = None) -> None:
         super().__init__(parent)
+        # Create signal holder (QObject for signals)
+        self.signals = ClickableFormulaBoxSignals()
         self.image_path = image_path
         self.bbox = bbox
         self.setRect(bbox["x"], bbox["y"], bbox["w"], bbox["h"])
@@ -40,7 +92,60 @@ class ClickableFormulaBox(QtWidgets.QGraphicsRectItem):
         self._update_menu_bg()
         self.menu_dot.setZValue(2)
         self.menu_bg.setZValue(1)
-    
+        
+        # Create handles
+        self.handles = {}
+        for pos in ["tl", "tc", "tr", "ml", "mr", "bl", "bc", "br"]:
+            self.handles[pos] = ResizeHandle(pos, self)
+        self._update_handles_pos()
+
+    def _update_handles_pos(self) -> None:
+        """Position all handles based on current rect."""
+        r = self.rect()
+        self.handles["tl"].setPos(r.topLeft())
+        self.handles["tc"].setPos(r.left() + r.width()/2, r.top())
+        self.handles["tr"].setPos(r.topRight())
+        self.handles["ml"].setPos(r.left(), r.top() + r.height()/2)
+        self.handles["mr"].setPos(r.right(), r.top() + r.height()/2)
+        self.handles["bl"].setPos(r.bottomLeft())
+        self.handles["bc"].setPos(r.left() + r.width()/2, r.bottom())
+        self.handles["br"].setPos(r.bottomRight())
+
+    def handle_resize(self, pos: str, delta: QtCore.QPointF) -> None:
+        """Update rect based on handle movement."""
+        r = self.rect()
+        # delta is in local coordinate space (relative to handle's (0,0) which is its center)
+        # But we need to move the edge of the rect.
+        # Simple implementation: move the edge to the scene mouse position
+        scene_pos = self.handles[pos].mapToScene(delta)
+        local_pos = self.mapFromScene(scene_pos)
+        
+        if "t" in pos: r.setTop(local_pos.y())
+        if "b" in pos: r.setBottom(local_pos.y())
+        if "l" in pos: r.setLeft(local_pos.x())
+        if "r" in pos: r.setRight(local_pos.x())
+        
+        # Ensure minimum size
+        if r.width() < 10: r.setWidth(10)
+        if r.height() < 10: r.setHeight(10)
+        
+        self.setRect(r)
+        self._update_handles_pos()
+        self._position_menu_dot()
+        self._update_menu_bg()
+
+    def finish_resize(self) -> None:
+        """Finalize resize and notify components to re-run OCR."""
+        r = self.rect()
+        # Find the pixmap item this box belongs to to get scaling
+        # (This is a bit tricky since we don't store the pixmap item directly here)
+        # But BoundingOverlay can do it.
+        # For now, just emit the new local coords, and let BoundingOverlay convert them.
+        self.signals.region_updated.emit(self.image_path, {
+            "scene_rect": r, # Pass the scene rect for conversion
+            "original_bbox": self._original_bbox
+        })
+
     def _position_menu_dot(self) -> None:
         """Position the menu dot at the top-right corner of the rect."""
         r = self.rect()
@@ -59,20 +164,26 @@ class ClickableFormulaBox(QtWidgets.QGraphicsRectItem):
         self.menu_bg.setRect(bg_rect)
     
     def hoverEnterEvent(self, event: QtWidgets.QGraphicsSceneHoverEvent) -> None:
-        """Show highlight on hover."""
+        """Show highlight and handles on hover."""
         self.setPen(QtGui.QPen(QtGui.QColor(0, 120, 212), 2, QtCore.Qt.PenStyle.DashLine))
         self.setBrush(QtGui.QBrush(QtGui.QColor(0, 120, 212, 20)))
-        # Show menu dot
+        # Show menu dot and handles
         self.menu_dot.setVisible(True)
         self.menu_bg.setVisible(True)
+        if hasattr(self, 'handles'):
+            for h in self.handles.values():
+                h.setVisible(True)
         super().hoverEnterEvent(event)
     
     def hoverLeaveEvent(self, event: QtWidgets.QGraphicsSceneHoverEvent) -> None:
-        """Remove highlight on leave."""
+        """Remove highlight and handles on leave."""
         self.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
         self.setBrush(QtGui.QBrush(QtCore.Qt.BrushStyle.NoBrush))
         self.menu_dot.setVisible(False)
         self.menu_bg.setVisible(False)
+        if hasattr(self, 'handles'):
+            for h in self.handles.values():
+                h.setVisible(False)
         super().hoverLeaveEvent(event)
     
     def mousePressEvent(self, event: QtWidgets.QGraphicsSceneMouseEvent) -> None:
@@ -82,15 +193,15 @@ class ClickableFormulaBox(QtWidgets.QGraphicsRectItem):
             # Convert to local coordinates to test hit
             if self.menu_dot.boundingRect().contains(event.pos() - self.menu_dot.pos()):
                 # Emit context menu at screen position
-                self.formula_context_menu.emit(self.image_path, self._original_bbox, event.screenPos())
+                self.signals.formula_context_menu.emit(self.image_path, self._original_bbox, event.screenPos())
                 return
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
             # Left click - select formula
-            self.formula_clicked.emit(self.image_path, self._original_bbox)
+            self.signals.formula_clicked.emit(self.image_path, self._original_bbox)
         elif event.button() == QtCore.Qt.MouseButton.RightButton:
             # Right click - show context menu
             scene_pos = event.screenPos()
-            self.formula_context_menu.emit(self.image_path, self._original_bbox, scene_pos)
+            self.signals.formula_context_menu.emit(self.image_path, self._original_bbox, scene_pos)
         super().mousePressEvent(event)
 
 
@@ -98,8 +209,10 @@ class BoundingOverlay(QtCore.QObject):
     """Handles bounding box drawing and region selection."""
 
     region_selected = QtCore.pyqtSignal(Path, dict)
+    selection_started = QtCore.pyqtSignal() # Emit when user starts dragging a new box
     selection_changed = QtCore.pyqtSignal(QtCore.QRectF)  # Emit selection rectangle for preview
     formula_selected = QtCore.pyqtSignal(Path, dict)  # Emit when formula is clicked
+    region_updated = QtCore.pyqtSignal(Path, dict)  # Emit when formula region is manually updated
     show_context_menu = QtCore.pyqtSignal(Path, dict, QtCore.QPoint)  # Emit for context menu
 
     def __init__(self, scene: QtWidgets.QGraphicsScene) -> None:
@@ -206,15 +319,54 @@ class BoundingOverlay(QtCore.QObject):
             box._position_menu_dot()  # adjust dot for scaled rect
             box._update_menu_bg()
             
-            # Connect signals
-            box.formula_clicked.connect(self.formula_selected.emit)
-            box.formula_context_menu.connect(self.show_context_menu.emit)
+            # Connect signals (use signals object since QGraphicsItem can't have signals directly)
+            box.signals.formula_clicked.connect(self.formula_selected.emit)
+            box.signals.formula_context_menu.connect(self.show_context_menu.emit)
+            box.signals.region_updated.connect(lambda p, d: self._handle_region_updated(p, d, pixmap_item))
             
             # Set z-value to be above the pixmap but below selection rectangles
             box.setZValue(1)
             
             self.scene.addItem(box)
             self.formula_boxes.append(box)
+
+    def _handle_region_updated(self, image_path: Path, data: dict, pixmap_item: QtWidgets.QGraphicsPixmapItem) -> None:
+        """Convert scene rect back to image bbox and emit signal."""
+        scene_rect = data["scene_rect"]
+        
+        # Get pixmap item position and scale
+        item_pos = pixmap_item.pos()
+        item_rect = pixmap_item.boundingRect()
+        pixmap = pixmap_item.pixmap()
+        
+        if pixmap.isNull():
+            return
+            
+        # Scaling factor: scene size / original image size
+        scale_x = item_rect.width() / pixmap.width()
+        scale_y = item_rect.height() / pixmap.height()
+        
+        # Invert the conversion: (scene - item_pos) / scale
+        img_x = (scene_rect.x() - item_pos.x()) / scale_x
+        img_y = (scene_rect.y() - item_pos.y()) / scale_y
+        img_w = scene_rect.width() / scale_x
+        img_h = scene_rect.height() / scale_y
+        
+        new_bbox = {
+            "x": int(img_x),
+            "y": int(img_y),
+            "w": int(img_w),
+            "h": int(img_h)
+        }
+        
+        # Clamp to image boundaries
+        new_bbox["x"] = max(0, new_bbox["x"])
+        new_bbox["y"] = max(0, new_bbox["y"])
+        new_bbox["w"] = min(pixmap.width() - new_bbox["x"], new_bbox["w"])
+        new_bbox["h"] = min(pixmap.height() - new_bbox["y"], new_bbox["h"])
+        
+        logger.info(f"[BoundingOverlay] Region updated for {image_path.name}: {new_bbox}")
+        self.region_updated.emit(image_path, new_bbox)
 
     def _clear_selection_rect(self) -> None:
         """Remove the selection rectangle from the scene."""
@@ -236,6 +388,8 @@ class BoundingOverlay(QtCore.QObject):
         if event.type() == QtCore.QEvent.Type.GraphicsSceneMousePress:
             self.start_pos = event.scenePos()
             self._clear_selection_rect()
+            self.clear_boxes() # Clear old OCR boxes when starting new selection
+            self.selection_started.emit()
             logger.debug("Selection started at: %s", self.start_pos)
         elif event.type() == QtCore.QEvent.Type.GraphicsSceneMouseMove and self.start_pos:
             # Draw selection rectangle while dragging

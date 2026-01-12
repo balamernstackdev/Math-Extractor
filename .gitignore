@@ -34,6 +34,8 @@ data/mathml/
 
 # Build artifacts
 *.spec.bak
+installer/app/
+installer/*.exe
 
 # ML Models (if downloaded separately)
 *.pth
@@ -54,3 +56,4 @@ tests/*.jpeg
 *.tmp
 *.temp
 *.bak
+node_modules

@@ -6,6 +6,8 @@ from typing import List
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
+from ui.styles import Theme
+
 
 class EnhancedSidebar(QtWidgets.QFrame):
     """Modern sidebar with navigation and PDF file list."""
@@ -19,65 +21,66 @@ class EnhancedSidebar(QtWidgets.QFrame):
         super().__init__()
         self.setFixedWidth(300)
         self._pdf_paths: set[str] = set()
-        self.setStyleSheet("""
-            QFrame {
-                background-color: #1f1f1f;
-            }
-            QPushButton {
+        self.setStyleSheet(f"""
+            QFrame {{
+                background-color: {Theme.BACKGROUND};
+            }}
+            QPushButton {{
                 background-color: transparent;
-                color: #e0e0e0;
+                color: {Theme.TEXT_SECONDARY};
                 border: none;
                 padding: 12px 16px;
                 text-align: left;
                 border-radius: 6px;
                 font-weight: 500;
                 font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #2a2a2a;
-            }
-            QPushButton:checked {
-                background-color: #0078d4;
-                color: white;
-            }
-            QLineEdit {
-                background-color: #252525;
-                color: #e0e0e0;
-                border: 1px solid #3a3a3a;
+            }}
+            QPushButton:hover {{
+                background-color: {Theme.SURFACE_HOVER};
+                color: {Theme.TEXT_PRIMARY};
+            }}
+            QPushButton:checked {{
+                background-color: {Theme.ACCENT};
+                color: {Theme.ACCENT_TEXT};
+            }}
+            QLineEdit {{
+                background-color: {Theme.SURFACE};
+                color: {Theme.TEXT_PRIMARY};
+                border: 1px solid {Theme.BORDER};
                 border-radius: 6px;
                 padding: 10px 12px;
                 font-size: 13px;
-            }
-            QLineEdit:focus {
-                border: 1px solid #0078d4;
-            }
-            QListWidget {
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {Theme.BORDER_FOCUS};
+            }}
+            QListWidget {{
                 background-color: transparent;
-                color: #e0e0e0;
+                color: {Theme.TEXT_SECONDARY};
                 border: none;
                 outline: none;
-            }
-            QListWidget::item {
+            }}
+            QListWidget::item {{
                 padding: 10px 14px;
                 border: none;
                 border-radius: 6px;
                 margin: 2px 0px;
                 min-height: 42px;
-                color: #e0e0e0;
+                color: {Theme.TEXT_SECONDARY};
                 background-color: transparent;
-            }
-            QListWidget::item:hover {
-                background-color: #2a2a2a;
-                color: white;
-            }
-            QListWidget::item:selected {
-                background-color: #0078d4;
-                color: white;
-            }
-            QListWidget::item:selected:hover {
-                background-color: #106ebe;
-                color: white;
-            }
+            }}
+            QListWidget::item:hover {{
+                background-color: {Theme.SURFACE_HOVER};
+                color: {Theme.TEXT_PRIMARY};
+            }}
+            QListWidget::item:selected {{
+                background-color: {Theme.ACCENT};
+                color: {Theme.ACCENT_TEXT};
+            }}
+            QListWidget::item:selected:hover {{
+                background-color: {Theme.ACCENT_HOVER};
+                color: {Theme.ACCENT_TEXT};
+            }}
         """)
         
         layout = QtWidgets.QVBoxLayout(self)
@@ -97,8 +100,20 @@ class EnhancedSidebar(QtWidgets.QFrame):
             font-weight: 700; 
             color: #ffffff;
             letter-spacing: 1px;
-            padding: 0px;
+            padding-left: 5px;
         """)
+        
+        # Add Icon if present
+        from pathlib import Path
+        if Path("app_icon.png").exists():
+             logo_icon = QtWidgets.QLabel()
+             pixmap = QtGui.QPixmap("app_icon.png")
+             # Scale if needed
+             pixmap = pixmap.scaled(32, 32, QtCore.Qt.AspectRatioMode.KeepAspectRatio, QtCore.Qt.TransformationMode.SmoothTransformation)
+             logo_icon.setPixmap(pixmap)
+             logo_layout.addWidget(logo_icon)
+             logo_layout.addSpacing(6)
+        
         logo_layout.addWidget(logo_label)
         logo_layout.addStretch()
         layout.addWidget(logo_frame)
@@ -113,8 +128,9 @@ class EnhancedSidebar(QtWidgets.QFrame):
         self.notes_btn = self._create_nav_button("Notes", "notes")
         self.pdfs_btn = self._create_nav_button("PDFs", "pdfs")
         self.snips_btn = self._create_nav_button("Snips", "snips")
+        self.history_btn = self._create_nav_button("History", "history")
 
-        for btn in [self.home_btn, self.files_btn, self.notes_btn, self.pdfs_btn, self.snips_btn]:
+        for btn in [self.home_btn, self.files_btn, self.notes_btn, self.pdfs_btn, self.snips_btn, self.history_btn]:
             nav_group.addButton(btn)
             layout.addWidget(btn)
             btn.setCheckable(True)
@@ -142,15 +158,15 @@ class EnhancedSidebar(QtWidgets.QFrame):
         separator = QtWidgets.QFrame()
         separator.setFrameShape(QtWidgets.QFrame.Shape.HLine)
         separator.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
-        separator.setStyleSheet("color: #2d2d2d; max-height: 1px;")
+        separator.setStyleSheet(f"color: {Theme.BORDER}; max-height: 1px;")
         layout.addWidget(separator)
         
         layout.addSpacing(8)
 
         # PDFs section
         pdfs_label = QtWidgets.QLabel("PDFs")
-        pdfs_label.setStyleSheet("""
-            color: #b0b0b0; 
+        pdfs_label.setStyleSheet(f"""
+            color: {Theme.TEXT_TERTIARY}; 
             font-size: 11px; 
             font-weight: 600;
             text-transform: uppercase;
@@ -164,10 +180,8 @@ class EnhancedSidebar(QtWidgets.QFrame):
         self.search_edit.setPlaceholderText("Search your content")
         layout.addWidget(self.search_edit)
 
-        # PDF file list - with limited height and scrollable
+        # PDF file list - scrollable and filling space
         self.pdf_list = QtWidgets.QListWidget()
-        self.pdf_list.setMaximumHeight(120)  # Reduced to make room for formulas
-        self.pdf_list.setMinimumHeight(60)
         self.pdf_list.setSpacing(2)
         self.pdf_list.itemClicked.connect(self._on_pdf_selected)
         self.pdf_list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
@@ -177,40 +191,18 @@ class EnhancedSidebar(QtWidgets.QFrame):
         self._update_list_placeholder()
         layout.addWidget(self.pdf_list)
         
-        # Formulas section (page-wise)
-        formulas_label = QtWidgets.QLabel("Extracted Formulas")
-        formulas_label.setStyleSheet("""
-            color: #b0b0b0; 
-            font-size: 11px; 
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            padding: 4px 0px;
-            margin-top: 8px;
-        """)
-        layout.addWidget(formulas_label)
-        
-        self.formulas_list = QtWidgets.QListWidget()
-        self.formulas_list.setMaximumHeight(250)
-        self.formulas_list.setMinimumHeight(100)
-        layout.addWidget(self.formulas_list)
-        self.formulas_list.itemClicked.connect(self._on_formula_clicked)
-        
-        # Add initial placeholder
-        placeholder = QtWidgets.QListWidgetItem("No formulas extracted yet")
-        placeholder.setForeground(QtGui.QColor("#888"))
-        placeholder.setFlags(QtCore.Qt.ItemFlag.NoItemFlags)
-        self.formulas_list.addItem(placeholder)
+        # Add stretch to push everything up (PDF list will expand)
+        # layout.addStretch()
 
         # Status label - modern design
         status_frame = QtWidgets.QFrame()
-        status_frame.setStyleSheet("""
-            QFrame {
-                background: #252525;
-                border: 1px solid #3a3a3a;
+        status_frame.setStyleSheet(f"""
+            QFrame {{
+                background: {Theme.SURFACE};
+                border: 1px solid {Theme.BORDER};
                 border-radius: 6px;
                 padding: 0px;
-            }
+            }}
         """)
         status_layout = QtWidgets.QVBoxLayout(status_frame)
         status_layout.setContentsMargins(12, 10, 12, 10)
@@ -228,22 +220,22 @@ class EnhancedSidebar(QtWidgets.QFrame):
 
         # Upload button - modern prominent design
         self.upload_btn = QtWidgets.QPushButton("📄 Upload PDF")
-        self.upload_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #0078d4;
-                color: white;
+        self.upload_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {Theme.ACCENT};
+                color: {Theme.ACCENT_TEXT};
                 padding: 14px;
                 border-radius: 8px;
                 font-weight: 600;
                 font-size: 14px;
                 border: none;
-            }
-            QPushButton:hover {
-                background-color: #106ebe;
-            }
-            QPushButton:pressed {
-                background-color: #005a9e;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {Theme.ACCENT_HOVER};
+            }}
+            QPushButton:pressed {{
+                background-color: {Theme.ACCENT_PRESSED};
+            }}
         """)
         self.upload_btn.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         self.upload_btn.clicked.connect(self._on_upload)
@@ -289,6 +281,21 @@ class EnhancedSidebar(QtWidgets.QFrame):
                 self.pdf_list.setCurrentItem(item)
                 self._current_selected_pdf = pdf_path
                 break
+    
+    def set_active_nav(self, nav_name: str) -> None:
+        """Set the active navigation button programmatically."""
+        nav_buttons = {
+            "home": self.home_btn,
+            "files": self.files_btn,
+            "notes": self.notes_btn,
+            "pdfs": self.pdfs_btn,
+            "snips": self.snips_btn,
+            "history": self.history_btn
+        }
+        
+        btn = nav_buttons.get(nav_name)
+        if btn:
+            btn.setChecked(True)
 
     def _add_pdf_to_list(self, pdf_path: str) -> None:
         """Add a PDF to the file list with Mathpix-style formatting."""
@@ -379,59 +386,23 @@ class EnhancedSidebar(QtWidgets.QFrame):
         if btn := buttons.get(nav_name):
             btn.setChecked(True)
 
-    def set_status(self, text: str) -> None:
-        """Update sidebar status text."""
+    def set_status(self, text: str, mode: str = "normal") -> None:
+        """Update sidebar status text with contextual styling."""
         self.status_label.setText(text)
+        
+        if mode == "success":
+            self.status_label.setStyleSheet("color: #4CAF50; font-size: 11px; font-weight: 700; text-transform: uppercase;")
+        elif mode == "error":
+            self.status_label.setStyleSheet("color: #F44336; font-size: 11px; font-weight: 700; text-transform: uppercase;")
+        elif mode == "working":
+            self.status_label.setStyleSheet(f"color: {Theme.ACCENT}; font-size: 11px; font-weight: 700; text-transform: uppercase;")
+        else:
+            self.status_label.setStyleSheet(f"color: {Theme.TEXT_TERTIARY}; font-size: 11px; font-weight: 600; text-transform: uppercase;")
     
     def update_formulas_display(self, formulas_by_page: dict[int, List[dict]]) -> None:
         """Update the formulas list with page-wise extracted formulas."""
-        self.formulas_list.clear()
-        
-        if not formulas_by_page:
-            item = QtWidgets.QListWidgetItem("No formulas extracted yet")
-            item.setForeground(QtGui.QColor("#888"))
-            item.setFlags(QtCore.Qt.ItemFlag.NoItemFlags)  # Not selectable
-            self.formulas_list.addItem(item)
-            return
-        
-        # Sort pages
-        for page_num in sorted(formulas_by_page.keys()):
-            formulas = formulas_by_page[page_num]
-            if not formulas:
-                continue
-            
-            # Add page header
-            page_item = QtWidgets.QListWidgetItem(f"📄 Page {page_num} ({len(formulas)} formulas)")
-            page_item.setForeground(QtGui.QColor("#0078d4"))
-            font = page_item.font()
-            font.setBold(True)
-            page_item.setFont(font)
-            page_item.setFlags(QtCore.Qt.ItemFlag.NoItemFlags)  # Not selectable
-            self.formulas_list.addItem(page_item)
-            
-            # Add each formula
-            for idx, formula_data in enumerate(formulas, start=1):
-                mathml = formula_data.get("mathml", "")
-                latex = formula_data.get("latex", "")
-                
-                # Create a short preview text
-                if mathml:
-                    # Extract a short snippet from MathML
-                    preview = mathml[:80].replace("\n", " ").strip()
-                    if len(mathml) > 80:
-                        preview += "..."
-                elif latex:
-                    preview = latex[:60].strip()
-                    if len(latex) > 60:
-                        preview += "..."
-                else:
-                    preview = f"Formula {idx} (extraction pending)"
-                
-                item_text = f"  {idx}. {preview}"
-                item = QtWidgets.QListWidgetItem(item_text)
-                item.setData(QtCore.Qt.ItemDataRole.UserRole, formula_data)  # Store full data
-                item.setForeground(QtGui.QColor("#ccc"))
-                self.formulas_list.addItem(item)
+        # DEPRECATED: Formula list is now in the main view's right sidebar
+        pass
     
     def _on_formula_clicked(self, item: QtWidgets.QListWidgetItem) -> None:
         """Handle formula item click - emit signal to show in preview."""
