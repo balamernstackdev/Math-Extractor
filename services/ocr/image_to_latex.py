@@ -196,17 +196,66 @@ class ImageToLatex:
                 log_debug(f"Dependency check: FAILED to import transformers: {e}")
                 raise e
 
-            # CRITICAL: Monkey-patch pix2tex checkpoint path BEFORE import
+            # CRITICAL: Monkey-patch pix2tex checkpoint path BEFORE LatexOCR import
             # pix2tex tries to write to its package directory which is read-only on Streamlit Cloud
             pix2tex_cache = os.path.join(temp_dir, "mathpix_cache", "pix2tex")
             os.makedirs(pix2tex_cache, exist_ok=True)
             
             try:
-                # Patch the get_latest_checkpoint module before LatexOCR import
+                # Import the checkpoint module and patch BOTH the path variable AND the download function
                 import pix2tex.model.checkpoints.get_latest_checkpoint as ckpt_module
-                original_path = ckpt_module.path if hasattr(ckpt_module, 'path') else None
+                
+                # Save the original function
+                original_download = ckpt_module.download_checkpoints
+                original_path = getattr(ckpt_module, 'path', None)
+                
+                # Patch the path variable
                 ckpt_module.path = pix2tex_cache
+                
+                # Create a wrapper that uses our custom path
+                def patched_download_checkpoints(tag=None):
+                    """Patched version that downloads to writable temp directory."""
+                    import os
+                    import requests
+                    from tqdm import tqdm
+                    
+                    # Use our writable cache path
+                    cache_path = pix2tex_cache
+                    os.makedirs(cache_path, exist_ok=True)
+                    
+                    weights_file = os.path.join(cache_path, "weights.pth")
+                    
+                    # Check if already downloaded
+                    if os.path.exists(weights_file) and os.path.getsize(weights_file) > 50_000_000:
+                        log_debug(f"Using cached weights from: {weights_file}")
+                        return weights_file
+                    
+                    # Download from GitHub
+                    tag = tag or "v0.0.1"
+                    url = f"https://github.com/lukas-blecher/LaTeX-OCR/releases/download/{tag}/weights.pth"
+                    log_debug(f"Downloading pix2tex weights to: {weights_file}")
+                    
+                    try:
+                        response = requests.get(url, stream=True, timeout=120)
+                        response.raise_for_status()
+                        total_size = int(response.headers.get('content-length', 0))
+                        
+                        with open(weights_file, 'wb') as f:
+                            with tqdm(total=total_size, unit='B', unit_scale=True, desc="weights.pth") as pbar:
+                                for chunk in response.iter_content(chunk_size=8192):
+                                    f.write(chunk)
+                                    pbar.update(len(chunk))
+                        
+                        log_debug(f"Successfully downloaded weights to: {weights_file}")
+                        return weights_file
+                    except Exception as e:
+                        log_debug(f"Failed to download weights: {e}")
+                        raise
+                
+                # Replace the function in the module
+                ckpt_module.download_checkpoints = patched_download_checkpoints
                 log_debug(f"Patched pix2tex checkpoint path: {original_path} -> {pix2tex_cache}")
+                
             except Exception as patch_err:
                 log_debug(f"Could not patch pix2tex checkpoint path: {patch_err}")
 

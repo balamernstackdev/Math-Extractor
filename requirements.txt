@@ -4,6 +4,8 @@
 fastapi
 uvicorn
 httpx
+requests  # For pix2tex checkpoint download
+tqdm  # Progress bars
 python-multipart
 
 # -------------------------
