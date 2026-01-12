@@ -64,7 +64,7 @@ ensure_directories()
 
 # Cached services
 @st.cache_resource
-def get_services_v4():
+def get_services_v5():
     return {
         "pdf_reader": PDFReader(),
         "pdf_renderer": PDFRenderer(),
@@ -131,7 +131,7 @@ if "extraction_complete" not in st.session_state:
 if "manual_snip_result" not in st.session_state:
     st.session_state.manual_snip_result = None
 
-services = get_services_v4()
+services = get_services_v5()
 if hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
     try:
         services["latex_ocr"].set_api_key(st.secrets["OPENAI_API_KEY"])

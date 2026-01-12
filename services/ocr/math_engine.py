@@ -765,10 +765,21 @@ class ImageToLatex:
         
         if cleaned:
             cleaned = self._try_openai_ocr_cleanup(cleaned)
+            
+        # Append Debug Info
+        debug_tags = []
+        if self.init_error: debug_tags.append(f"Error: {self.init_error}")
         
-        final_output = (cleaned + r" \quad \text{[Tesseract]}") if cleaned else r"\text{OCR failed}"
-        if self.init_error:
-             final_output += f" \\quad \\text{{[Error: {self.init_error}]}}"
+        # Add Raw Snippet for Regex debugging
+        # Escape curly braces for LaTeX
+        import re
+        raw_safe = re.sub(r'([{}])', r'\\\1', latex_result[:50])
+        debug_tags.append(f"Raw: {raw_safe}...")
+        
+        final_output = cleaned if cleaned else r"\text{OCR failed}"
+        if debug_tags:
+             final_output += r" \quad \text{[" + " | ".join(debug_tags) + "]}"
+             
         return final_output
     
     def _preprocess_image(self, image) -> any:  # noqa: ANN401
@@ -797,14 +808,15 @@ class ImageToLatex:
         # 1. "Arrow" before \sum, \int, \prod implies it should be "="
         #    e.g. "Y \to \sum" -> "Y = \sum"
         #    Global replace: any arrow followed by operator -> = operator
-        text = re.sub(r'\\(to|rightarrow|longrightarrow)\s*(\\sum|\\int|\\prod)', r'= \2', text)
+        #    Improved to handle \limits and space
+        text = re.sub(r'\\(to|rightarrow|longrightarrow)(\s*\\limits)?\s*(\\sum|\\int|\\prod)', r'= \3', text)
         text = re.sub(r'([a-zA-Z0-9\]\)\}])\s*-\s*(\\sum|\\int|\\prod)', r'\1 = \2', text)
         
         # 2. Fix the specific case of vertical bar being confused with equals
         #    Also fix "h" being read as "|" after sum: "\sum |_" -> "\sum h_"
-        #    (Matches \sum | followed by _ or {)
+        #    Match \sum | followed by _{ij[ (typical subscript chars)
         text = re.sub(r'([a-zA-Z0-9\]\)\}])\s*\|\s*(\\sum|\\int|\\prod)', r'\1 = \2', text)
-        text = re.sub(r'(\\sum|\\int)\s*\|\s*([_{])', r'\1 h\2', text)
+        text = re.sub(r'(\\sum|\\int)\s*\|\s*([_{ij\[])', r'\1 h\2', text)
 
         return text.strip()
     
