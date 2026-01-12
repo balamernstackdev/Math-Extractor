@@ -51,7 +51,7 @@ except Exception:
 
 from core.logger import init_logging, logger
 from services.ocr.formula_detector import FormulaDetector
-from services.ocr.image_to_latex import ImageToLatex
+from services.ocr.ocr_engine import ImageToLatex
 from services.ocr.latex_to_mathml import LatexToMathML
 from services.pdf_loader.pdf_reader import PDFReader
 from services.pdf_loader.pdf_renderer import PDFRenderer
