@@ -147,6 +147,18 @@ with st.sidebar:
              except FileNotFoundError:
                  st.info("Log file not found")
 
+        if st.button("🔌 Test OpenAI Connection"):
+            try:
+                import openai
+                client = openai.OpenAI(api_key=settings.openai_api_key or os.getenv("OPENAI_API_KEY"))
+                st.info("Attempting to connect...")
+                models = client.models.list()
+                st.success(f"✅ Connection Successful! Found {len(list(models))} models.")
+            except ImportError:
+                st.error("❌ 'openai' library not installed.")
+            except Exception as e:
+                st.error(f"❌ Connection Failed: {e}")
+
         if st.button("Reload Config"):
             st.rerun()
 
