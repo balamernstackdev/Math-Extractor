@@ -495,11 +495,12 @@ class ImageToLatex:
             self.has_math_ocr 
             and not handwriting_mode 
             and not table_mode
-            and not has_vision_api  # Skip local OCR if Vision API is available
+            # Fixed: checking has_vision_api here caused us to SKIP local OCR if a bad key was present.
+            # We now ALWAYS prefer local OCR first, using Vision only as a fallback.
         )
         
-        if has_vision_api and not handwriting_mode and not table_mode:
-            logger.info("[OCR] OpenAI API key detected - using Vision API (avoids pix2tex Tensor error)")
+        if has_vision_api and not use_local_ocr:
+            logger.info("[OCR] Vision API preferred (Handwriting/Table mode)")
 
         # Use math-specific OCR if available (much better for formulas)
         if use_local_ocr:
