@@ -1094,7 +1094,7 @@ class ImageToLatex:
             return None
     
     def _is_corrupted_ocr_output(self, text: str) -> bool:
-        """Detect if OCR output is corrupted."""
+        """Detect if OCR output is corrupted (Stub 2)."""
         if not text: return True
         return False
 

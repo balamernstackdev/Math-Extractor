@@ -1,4 +1,4 @@
-"""Streamlit web application for MathPix Clone - Matching Desktop UI Flow."""
+"""Streamlit web application for MathPix Clone - Matching Desktop UI Flow. (Rebuild)"""
 from __future__ import annotations
 
 import os
