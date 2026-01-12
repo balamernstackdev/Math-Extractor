@@ -51,7 +51,7 @@ except Exception:
 
 from core.logger import init_logging, logger
 from services.ocr.formula_detector import FormulaDetector
-from services.ocr.ocr_engine import ImageToLatex
+from services.ocr.math_engine import ImageToLatex
 from services.ocr.latex_to_mathml import LatexToMathML
 from services.pdf_loader.pdf_reader import PDFReader
 from services.pdf_loader.pdf_renderer import PDFRenderer
@@ -64,7 +64,7 @@ ensure_directories()
 
 # Cached services
 @st.cache_resource
-def get_services_v2():
+def get_services_v3():
     return {
         "pdf_reader": PDFReader(),
         "pdf_renderer": PDFRenderer(),
@@ -131,7 +131,7 @@ if "extraction_complete" not in st.session_state:
 if "manual_snip_result" not in st.session_state:
     st.session_state.manual_snip_result = None
 
-services = get_services_v2()
+services = get_services_v3()
 if hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
     try:
         services["latex_ocr"].set_api_key(st.secrets["OPENAI_API_KEY"])
