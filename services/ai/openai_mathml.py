@@ -28,19 +28,29 @@ class OpenAIMathMLConverter:
     latex2mathml cannot handle properly.
     """
     
-    def __init__(self, model: str = "gpt-4o-mini"):
+    def __init__(self, model: str = "gpt-4o-mini", api_key: Optional[str] = None):
         """
         Initialize the OpenAI converter.
         
         Args:
             model: OpenAI model to use (default: gpt-4o-mini for cost efficiency)
+            api_key: Optional API key. If not provided, reads form os.environ.
         """
         self.model = model
         
-        # Get API key from environment
-        self.api_key = os.getenv("OPENAI_API_KEY")
+        # Get API key from argument or environment
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        
+        # Fallback to settings if available (Streamlit Cloud Secrets)
         if not self.api_key:
-            raise ValueError("OPENAI_API_KEY not found in environment variables")
+            try:
+                from core.config import settings
+                self.api_key = settings.openai_api_key
+            except ImportError:
+                pass
+                
+        if not self.api_key:
+            raise ValueError("OPENAI_API_KEY not found in environment variables or settings")
         
         # --- ROBUST PROXY HANDLING ---
         self._http_client = None

@@ -1073,11 +1073,18 @@ class ImageToLatex:
             from services.ai.openai_mathml import OpenAIMathMLConverter
             
             # Check if API key is available (it's loaded in OpenAIMathMLConverter)
-            import os
-            if not os.getenv("OPENAI_API_KEY"):
+            from core.config import settings
+            api_key = settings.openai_api_key
+            
+            if not api_key:
+                # Fallback to env var
+                import os
+                api_key = os.getenv("OPENAI_API_KEY")
+            
+            if not api_key:
                 return None
                 
-            converter = OpenAIMathMLConverter()
+            converter = OpenAIMathMLConverter(api_key=api_key)
             return converter.convert_image_to_latex(image, table_mode=table_mode, handwriting_mode=handwriting_mode)
         except ImportError:
             return None
