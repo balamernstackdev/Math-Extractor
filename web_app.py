@@ -440,6 +440,35 @@ with col_right:
             st.markdown("**📄 MathML Code:**")
             st.code(res["mathml"], language="xml")
             st.download_button("📥 Download Snip MathML", res["mathml"], "snip_formula.mml", "application/xml")
+            
+            # Enhance with AI Button (Manual Snip)
+            st.markdown("---")
+            if st.button("✨ Enhance with Cloud AI (Better Accuracy)", key="enhance_snip", help="Use GPT-4 Vision to fix broken equations"):
+                if not services["latex_ocr"].has_vision_fallback_configured():
+                   st.warning("⚠️ OpenAI API Key needed for enhancement")
+                   api_key = st.text_input("Enter OpenAI API Key:", type="password", key="snip_api_key")
+                   if api_key:
+                        services["latex_ocr"].set_api_key(api_key)
+                        st.rerun()
+                else:
+                    if "image" in res:
+                        with st.spinner("✨ Enhancing with GPT-4 Vision..."):
+                            try:
+                                # Save image to temp for processing
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+                                    res["image"].save(tmp, format="PNG")
+                                    tmp_path = Path(tmp.name)
+                                
+                                # Process with forced Vision
+                                latex = services["latex_ocr"].image_to_latex(tmp_path, handwriting_mode=True) # handwriting_mode forces Vision
+                                mathml = services["latex_mathml"].convert(latex) if latex else ""
+                                
+                                st.session_state.manual_snip_result["latex"] = latex
+                                st.session_state.manual_snip_result["mathml"] = mathml
+                                st.session_state.manual_snip_result["is_valid"] = True
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Enhancement failed: {e}")
         st.markdown("---")
 
     # -------------------------------------------------------------------------
@@ -474,6 +503,35 @@ with col_right:
                 st.warning("⚠️ MathML may have issues")
         else:
             st.error("❌ No MathML generated")
+        
+        # Enhance with AI Button (Formulas)
+        st.markdown("---")
+        if st.button("✨ Enhance with Cloud AI (Better Accuracy)", key=f"enhance_f{st.session_state.selected_formula}", help="Use GPT-4 Vision to fix broken equations"):
+            if not services["latex_ocr"].has_vision_fallback_configured():
+                st.warning("⚠️ OpenAI API Key needed for enhancement")
+                api_key = st.text_input("Enter OpenAI API Key:", type="password", key="formula_api_key")
+                if api_key:
+                    services["latex_ocr"].set_api_key(api_key)
+                    st.rerun()
+            else:
+                crop_path = formula.get("crop_path")
+                if crop_path and Path(crop_path).exists():
+                    with st.spinner("✨ Enhancing with GPT-4 Vision..."):
+                        try:
+                            # Process with forced Vision (handwriting_mode=True forces Vision)
+                            latex = services["latex_ocr"].image_to_latex(crop_path, handwriting_mode=True)
+                            mathml = services["latex_mathml"].convert(latex) if latex else ""
+                            
+                            # Update formula in state
+                            st.session_state.formulas[st.session_state.selected_formula]["latex"] = latex
+                            st.session_state.formulas[st.session_state.selected_formula]["mathml"] = mathml
+                            st.session_state.formulas[st.session_state.selected_formula]["is_valid"] = True
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Enhancement failed: {e}")
+                else:
+                    st.error("No image available for enhancement")
+        st.markdown("---")
         
         # Download buttons
         col1, col2 = st.columns(2)

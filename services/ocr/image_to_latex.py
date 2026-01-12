@@ -259,6 +259,18 @@ class ImageToLatex:
             except Exception as patch_err:
                 log_debug(f"Could not patch pix2tex checkpoint path: {patch_err}")
 
+    def has_vision_fallback_configured(self) -> bool:
+        """Check if OpenAI API key is available for fallback."""
+        from core.config import settings
+        return bool(settings.openai_api_key)
+
+    def set_api_key(self, api_key: str):
+        """Set the OpenAI API key dynamically."""
+        import os
+        from core.config import settings
+        os.environ["OPENAI_API_KEY"] = api_key
+        settings.openai_api_key = api_key
+
             from pix2tex.cli import LatexOCR
             import munch
             from utils.resource_utils import get_resource_path
@@ -524,11 +536,21 @@ class ImageToLatex:
                 if pil_image.mode != 'RGB':
                     pil_image = pil_image.convert('RGB')
                 
-                # ACCURACY FIX: Add padding!
-                # pix2tex (ViT) often fails if text touches the border. 
-                # Adding 20-30px white padding improves accuracy significantly.
+                # ACCURACY FIX: Mandatory Padding & Contrast for Math Models
+                # pix2tex (ViT) needs whitespace around the formula
                 from PIL import ImageOps
+                
+                # 1. Add substantial padding (30px)
                 pil_image = ImageOps.expand(pil_image, border=30, fill='white')
+                
+                # 2. Resize up if too small (Critical for small crop regions)
+                if pil_image.height < 100:
+                    scale = 2.0
+                    if pil_image.height < 50: scale = 3.0
+                    pil_image = pil_image.resize(
+                        (int(pil_image.width * scale), int(pil_image.height * scale)), 
+                        Image.Resampling.LANCZOS
+                    )
                 
                 latex_result = self.math_ocr(pil_image)
                 
