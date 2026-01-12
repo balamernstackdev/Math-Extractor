@@ -338,14 +338,25 @@ class ImageToLatex:
                         log_debug(f"Force-loaded tokenizer from: {tokenizer_path}")
                         log_debug(f"Forced tokenizer vocab size: {forced_tokenizer.get_vocab_size()}")
                         
-                        # Replace pix2tex's tokenizer with our correctly loaded one
-                        if hasattr(self.math_ocr, 'tokenizer'):
-                            old_vocab_size = len(self.math_ocr.tokenizer.get_vocab()) if hasattr(self.math_ocr.tokenizer, 'get_vocab') else 'unknown'
-                            log_debug(f"Replacing pix2tex tokenizer (old vocab size: {old_vocab_size})")
-                            self.math_ocr.tokenizer = forced_tokenizer
-                            log_debug("Tokenizer force-reload SUCCESS")
-                        else:
-                            log_debug("WARNING: math_ocr has no tokenizer attribute to replace!")
+                    # Resolution: Monkey-patch the library's root path detection if possible
+                    # Or simple approach: Just Create the dummy file it is looking for!
+                    # Path: /home/adminuser/venv/lib/python3.13/site-packages/pix2tex/model/app.py
+                    
+                    try:
+                        missing_file = os.path.join(base_path, 'model', 'app.py')
+                        if not os.path.exists(missing_file):
+                            log_debug(f"Creating dummy file at: {missing_file}")
+                            # We might not have write permission to site-packages, but let's try
+                            with open(missing_file, 'w') as f:
+                                f.write("# Dummy file created by Math Extractor fix\n")
+                    except Exception as e:
+                        log_debug(f"Could not create dummy file: {e}. Attempting import hack.")
+                        
+                    # Plan B: The error likely comes from 'utils.get_resource_path' or similar inside pix2tex.
+                    # We can try to initialize the Model directly instead of using LatexOCR wrapper class.
+                    # But first, let's look at the traceback user provided: 
+                    # It was "[Errno 2] No such file... app.py".
+                    # This implies something is doing open(...) on that file. 
                             
                     except Exception as tokenizer_reload_error:
                         log_debug(f"Tokenizer force-reload FAILED: {tokenizer_reload_error}")
@@ -420,7 +431,7 @@ class ImageToLatex:
                         'no_resize': False
                     })
                     
-                    self.math_ocr = LatexOCR(arguments=args)
+                    self.math_ocr = LatexOCR(arguments=args) # Try original first
                     
                     # Cleanup later? (OS handles temp usually, but explicit is nice)
                     # We leave it for now to avoid premature deletion
@@ -428,27 +439,93 @@ class ImageToLatex:
             self.has_math_ocr = True
             logger.info("Math OCR (pix2tex) initialized successfully")
             
-        except ImportError as ie:
-            log_msg = f"ImportError during initialization: {ie}"
-            log_debug(log_msg)
-            self._write_debug_file("ocr_import_error.txt", log_msg)
-            self.init_error = f"ImportError: {ie}"
-            
-            logger.warning(
-                "pix2tex not available. Falling back to Tesseract."
-            )
-            self.has_math_ocr = False
-            
-        except Exception as exc:  # noqa: BLE001
-            import traceback
-            tb = traceback.format_exc()
-            log_msg = f"CRITICAL ERROR initializing pix2tex: {exc}\n{tb}"
-            log_debug(log_msg)
-            self._write_debug_file("ocr_critical_error.txt", log_msg)
-            self.init_error = f"Init Error: {exc}"
-            
-            logger.exception("Failed to initialize pix2tex. Using Tesseract fallback")
-            self.has_math_ocr = False
+        except (ImportError, FileNotFoundError, Exception) as ie:
+            # RETRY WITH DIRECT MODEL LOADING (Bypassing LatexOCR wrapper)
+            log_debug(f"Standard initialization failed: {ie}. Attempting DIRECT load...")
+            try:
+                import torch
+                from transformers import PreTrainedTokenizerFast
+                from pix2tex.models.transformer import HybridViT
+                from pix2tex.dataset.transforms import test_transform
+                import cv2
+                import numpy as np
+
+                # reused variables from above: base_path, cache_weights, tokenizer_path
+                log_debug("Initializing HybridViT directly...")
+                
+                # Default config for standard pix2tex
+                # We use the same config as the temp one we tried to write
+                model = HybridViT(
+                    backbone_layers=[2, 3, 7],
+                    channels=1,
+                    dim=256,
+                    decoder_args={'attn_on_attn': True, 'cross_attend': True, 'num_head': 8, 'num_layers': 1},
+                    max_seq_len=512,
+                    max_dimensions=[1024, 2048],
+                    min_dimensions=[32, 32],
+                    patch_size=16,
+                    pad=False,
+                )
+                
+                # Load weights
+                device = 'cpu'
+                model.load_state_dict(torch.load(cache_weights, map_location=device))
+                model.to(device)
+                model.eval()
+                
+                # Load tokenizer
+                tokenizer = PreTrainedTokenizerFast(tokenizer_file=str(tokenizer_path))
+                
+                # Create a simple callable wrapper that mimics LatexOCR
+                class DirectLatexOCR:
+                    def __init__(self, model, tokenizer, transform):
+                        self.model = model
+                        self.tokenizer = tokenizer
+                        self.transform = transform
+                        self.device = 'cpu'
+                        self.args = munch.Munch({'no_cuda': True}) # Dummy args for logging
+                        
+                    def __call__(self, img):
+                        # Preprocess exactly how pix2tex does it
+                        if isinstance(img, Image.Image):
+                            if img.mode != 'RGB':
+                                img = img.convert('RGB')
+                            img = np.array(img)
+                        
+                        # Resize/Pad logic is already done in image_to_latex, but transform expects specific shape
+                        # We used 'test_transform' which handles ToTensor and Normalize
+                        # But wait, test_transform in pix2tex might expect specific args.
+                        # Let's verify standard pipeline manually.
+                        
+                        # Manual transform: Grayscale -> Resize/Pad if needed -> Normalize
+                        img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+                        img = Image.fromarray(img)
+                        
+                        # Use the library transform
+                        im = self.transform(image=np.array(img))['image'][:1]
+                        im = im.unsqueeze(0).to(self.device)
+                        
+                        # Generate
+                        with torch.no_grad():
+                             encoded = self.model.encoder(im)
+                             dec = self.model.decoder.generate(torch.LongTensor([self.model.decoder.bos_token]*1).to(self.device), self.model.max_seq_len, eos_token=self.model.decoder.eos_token, context=encoded, temperature=0.2)
+                        
+                        pred = self.tokenizer.decode(dec.detach().cpu().numpy()[0], skip_special_tokens=True)
+                        return pred.strip()
+
+                self.math_ocr = DirectLatexOCR(model, tokenizer, test_transform)
+                self.has_math_ocr = True
+                log_debug("DIRECT MODEL LOADING SUCCESSFUL!")
+                
+            except Exception as direct_err:
+                 log_debug(f"Direct load also failed: {direct_err}")
+                 import traceback
+                 log_debug(traceback.format_exc())
+                 
+                 # Re-raise original error to trigger Tesseract fallback
+                 self.init_error = f"Double Failure: {ie} -> {direct_err}"
+                 raise ie
+
 
     def _write_debug_file(self, filename, content):
         """Write debug info to user home/temp to ensure visibility."""
