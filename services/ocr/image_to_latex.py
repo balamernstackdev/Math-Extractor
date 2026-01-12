@@ -369,8 +369,23 @@ class ImageToLatex:
                     self.math_ocr = LatexOCR(arguments=args)
 
             else:
-                log_debug("Bundled model NOT found. Attempting fallback...")
-                self.math_ocr = LatexOCR()
+                log_debug("Bundled model NOT found. Attempting fallback with cached weights...")
+                # We know the patch above downloaded weights to pix2tex_cache
+                cache_weights = os.path.join(pix2tex_cache, "weights.pth")
+                
+                if os.path.exists(cache_weights):
+                    log_debug(f"Found cached weights at: {cache_weights}")
+                    # Manually construct args to force loading from our cache
+                    args = munch.Munch({
+                        'config': 'settings/config.yaml', 
+                        'checkpoint': cache_weights,
+                        'no_cuda': True,
+                        'no_resize': False
+                    })
+                    self.math_ocr = LatexOCR(arguments=args)
+                else:
+                    log_debug(f"Cached weights missing at {cache_weights}. Using default (might crash)...")
+                    self.math_ocr = LatexOCR()
 
             self.has_math_ocr = True
             logger.info("Math OCR (pix2tex) initialized successfully")
